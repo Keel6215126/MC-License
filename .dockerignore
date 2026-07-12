@@ -1,7 +1,8 @@
-node_modules
-data
-tmp
 .git
+.gitignore
+__pycache__
+*.pyc
+.venv
 .env
+tmp
 *.zip
-*.jar

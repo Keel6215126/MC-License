@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Minecraft Plugin Protector{% endblock %}
+{% block content %}
+<section class="hero home-hero">
+  <div>
+    <div class="eyebrow">MC License 1.5.1 + ProGuard 7.9.1</div>
+    <h1>License it. Obfuscate it. Ship one protected JAR.</h1>
+    <p>One Railway website now contains the MC License implementer and the universal ProGuard obfuscator, plus a one-click workflow that runs both in the correct order.</p>
+  </div>
+  <span class="status-chip">Railway ready</span>
+</section>
+<section class="tool-grid">
+  <a class="tool-card primary" href="/protect">
+    <span class="tool-number">01</span><h2>Protect</h2>
+    <p>Add the mandatory MC License gate, include all required runtime classes, then strongly obfuscate the final plugin.</p>
+    <strong>Recommended workflow →</strong>
+  </a>
+  <a class="tool-card" href="/license">
+    <span class="tool-number">02</span><h2>License only</h2>
+    <p>Inject MC License with your 8-character plugin ID. Invalid or missing licenses always disable the plugin.</p>
+    <strong>Open implementer →</strong>
+  </a>
+  <a class="tool-card" href="/obfuscate">
+    <span class="tool-number">03</span><h2>Obfuscate only</h2>
+    <p>Run the universal ProGuard processor on plugins, mods, or ordinary Java JARs without adding licensing.</p>
+    <strong>Open obfuscator →</strong>
+  </a>
+</section>
+<section class="panel fixed-list">
+  <h2>The licensing behavior cannot be changed</h2>
+  <ul>
+    <li>The check runs before the plugin's original <code>onEnable()</code>.</li>
+    <li>Missing, invalid, expired, rejected, or failed validation immediately disables the plugin.</li>
+    <li>The only runtime file created is an empty <code>mclicense.txt</code>.</li>
+    <li>No licensing modes, grace periods, fallback caches, embedded keys, or custom license servers exist.</li>
+  </ul>
+</section>
+{% endblock %}

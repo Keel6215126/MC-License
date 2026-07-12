@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Obfuscate a JAR · Plugin Protector{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <div><div class="eyebrow">Universal ProGuard</div><h1>Obfuscate any Java JAR.</h1><p>Automatic metadata detection supports Bukkit, Paper, Bungee, Velocity, Fabric, Forge, NeoForge, executable JARs, services, and more.</p></div>
+  <span class="status-chip">ProGuard 7.9.1</span>
+</section>
+<section class="panel form-panel">
+  <form class="stack" data-job-form>
+    <input type="hidden" name="workflow" value="obfuscate">
+    <div class="drop-zone" tabindex="0">
+      <input type="file" name="jar" accept=".jar,application/java-archive" required>
+      <strong>Drop a Java JAR here</strong><span class="file-label">or click to choose one — maximum {{ max_upload_mb }} MB</span>
+    </div>
+    <div class="grid two">
+      <label>Obfuscation mode
+        <select name="mode"><option value="strong" selected>Strong — rename and repackage</option><option value="safe">Safe — preserve detected entry classes</option></select>
+      </label>
+      <label>Optional dependency JARs or ZIPs
+        <input type="file" name="libraries" accept=".jar,.zip,application/java-archive,application/zip" multiple>
+        <small>Dependencies improve hierarchy analysis and are not copied into the output.</small>
+      </label>
+    </div>
+    {% if password_required %}<label>Website access key<input type="password" name="access_key" required autocomplete="current-password"></label>{% endif %}
+    <button type="submit">Obfuscate JAR</button>
+  </form>
+</section>
+{% include "status.html" %}
+{% endblock %}

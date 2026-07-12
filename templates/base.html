@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="License and ProGuard-obfuscate Minecraft plugins from one Railway-hostable website.">
+  <title>{% block title %}Minecraft Plugin Protector{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Plugin Protector</a>
+    <nav>
+      <a href="/protect">Protect</a>
+      <a href="/license">License</a>
+      <a href="/obfuscate">Obfuscate</a>
+      <a href="/license-check">Docs</a>
+    </nav>
+  </header>
+  <main class="shell">{% block content %}{% endblock %}</main>
+</body>
+</html>

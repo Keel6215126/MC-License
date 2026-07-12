@@ -1,18 +1,21 @@
-# MC License Implementer 2.0.1
+# Minecraft Plugin Protector 3.0.0
 
-A Railway-hostable web tool that adds the official MC License library to an existing Bukkit, Spigot, or Paper plugin JAR.
+A single Railway-hostable website combining:
 
-The website has one fixed workflow:
+- The fixed MC License 1.5.1 plugin implementer
+- The Universal ProGuard 7.9.1 web obfuscator
+- A one-click **Protect** pipeline that runs both in the correct order
 
-1. Upload a Minecraft plugin JAR.
-2. Enter the plugin's 8-character MC License plugin ID.
-3. Download the protected JAR.
+## Pages
 
-There are no license modes or behavior settings.
+- `/protect` — adds MC License, then strongly obfuscates the completed plugin
+- `/license` — adds only MC License
+- `/obfuscate` — runs only ProGuard
+- `/license-check` — MC License integration documentation
 
-## Fixed runtime behavior
+## Fixed licensing behavior
 
-The generated plugin entry point always performs this check before the original plugin enables:
+The website never offers licensing modes. Every licensed output performs this check before the original plugin starts:
 
 ```java
 if (!MCLicense.validateKey(this, "yourPluginId")) {
@@ -21,122 +24,63 @@ if (!MCLicense.validateKey(this, "yourPluginId")) {
 }
 ```
 
-That means:
+A missing, invalid, expired, rejected, or failed validation always disables the plugin. The only runtime file created by MC License is the empty `mclicense.txt` file where the user places their key.
 
-- A valid license allows the original `onEnable()` to run.
-- A missing, invalid, expired, rejected, or failed license check disables the plugin immediately.
-- The only runtime file created by MC License is an empty `mclicense.txt` inside the plugin's data folder.
-- The server owner places their license key directly inside `mclicense.txt` and restarts the server.
-- No `config.yml`, `license.yml`, offline cache, grace-period file, instance file, or custom licensing configuration is created.
+The injector shades both the MC License library and its required `org.json` runtime classes. This fixes the `NoClassDefFoundError: org/json/JSONObject` failure seen when only the MC License package was copied.
 
-## What the implementer adds
+## Combined Protect pipeline
 
-- Official `org.mclicense:library:1.5.1` classes
-- Required `org.json` runtime classes, preventing `NoClassDefFoundError: org/json/JSONObject`
-- A generated wrapper entry point
-- The supplied 8-character MC License plugin ID
-- A small `META-INF/mclicense-implementer.properties` build marker
+1. Validates the upload and the 8-character plugin ID.
+2. Injects the official MC License 1.5.1 library.
+3. Injects `org.json`, including `JSONObject.class`.
+4. Generates a mandatory wrapper entry point.
+5. Runs ProGuard in fixed **strong** mode.
+6. Rewrites supported plugin metadata after class renaming.
+7. Confirms the final JAR still contains the license marker and mapped licensing runtime classes.
+8. Returns the final JAR and a diagnostic bundle with mapping/config/log files.
 
-The uploaded plugin is read as a ZIP/JAR archive and class file. It is never executed by the website.
+## Standalone obfuscator
 
-## MC License dependency
-
-Maven:
-
-```xml
-<repositories>
-  <repository>
-    <id>flyte-repository-releases</id>
-    <name>Flyte Repository</name>
-    <url>https://repo.flyte.gg/releases</url>
-  </repository>
-</repositories>
-
-<dependencies>
-  <dependency>
-    <groupId>org.mclicense</groupId>
-    <artifactId>library</artifactId>
-    <version>1.5.1</version>
-    <scope>compile</scope>
-  </dependency>
-</dependencies>
-```
-
-Gradle:
-
-```groovy
-repositories {
-    maven {
-        name = "flyteRepositoryReleases"
-        url = uri("https://repo.flyte.gg/releases")
-    }
-}
-
-dependencies {
-    implementation "org.mclicense:library:1.5.1"
-}
-```
-
-Gradle Kotlin DSL:
-
-```kotlin
-repositories {
-    maven {
-        name = "flyteRepositoryReleases"
-        url = uri("https://repo.flyte.gg/releases")
-    }
-}
-
-dependencies {
-    implementation("org.mclicense:library:1.5.1")
-}
-```
-
-The single-class alternative is available from `flytegg/mcl-library-one-class` on GitHub.
+The standalone page keeps the original safe and strong modes and detects Bukkit, Paper, BungeeCord, Velocity, Fabric, Forge, NeoForge, executable JARs, Spring metadata, services, and generic Java JARs.
 
 ## Railway deployment
 
-1. Connect this repository to a Railway service.
-2. Railway uses the root `Dockerfile`.
-3. Generate a public domain.
-4. Open the website and upload a plugin.
+1. Upload every file in this folder to a GitHub repository.
+2. Connect the repository to Railway.
+3. Railway automatically uses the root `Dockerfile`.
+4. Generate a public domain.
 
-No database, admin password, session secret, signing key, custom validation server, or persistent volume is required.
+No database or persistent volume is required. Railway injects `PORT` automatically.
 
-The Docker build resolves MC License library 1.5.1 and all runtime dependencies through Maven. It verifies that both `org/mclicense/library/MCLicense.class` and `org/json/JSONObject.class` exist before completing.
+Recommended variables:
 
-The committed lockfile contains registry URLs from the original build environment. The Dockerfile rewrites that registry prefix to `https://registry.npmjs.org/` before running deterministic `npm ci`.
+```text
+APP_PASSWORD=optional-long-password
+MAX_UPLOAD_MB=100
+JOB_TTL_MINUTES=60
+OBFUSCATION_TIMEOUT_SECONDS=240
+LICENSE_TIMEOUT_SECONDS=45
+MAX_PARALLEL_JOBS=1
+MAX_QUEUED_JOBS=20
+JAVA_MAX_HEAP_MB=512
+```
 
-## Local development
+## Local testing
 
-Requirements:
-
-- Node.js 22+
-- JDK 17+
-- `javac`, `java`, and `jar` on `PATH`
-- MC License library 1.5.1 and its runtime dependency JARs stored in `vendor/`
+Requirements: Python 3.11+, Java/JDK 17+, ProGuard 7.9.1, and MC License dependencies in a directory referenced by `MCL_DEPENDENCY_DIR`.
 
 ```bash
-npm ci
+python3 -m pip install -r requirements.txt
 ./scripts/build-java.sh
-npm start
+python3 -m unittest discover -s tests -v
+./scripts/test-license.sh
+python3 app.py
 ```
 
-Open `http://localhost:3000`.
+## Security and limitations
 
-## Tests
-
-```bash
-npm test
-./scripts/test-patcher.sh
-```
-
-The patcher test confirms that a failed validation disables the plugin and prevents the original `onEnable()` from running.
-
-## Compatibility
-
-- Supports standard `plugin.yml` and `paper-plugin.yml` main entries.
-- Supports final Java or Kotlin plugin main classes and final `onEnable()` methods.
-- The plugin main class must have a zero-argument constructor, as normal `JavaPlugin` classes do.
-- Existing JAR signature files are removed because modifying a JAR invalidates them.
-- BungeeCord, Waterfall, and Velocity plugin descriptors are not supported.
+- Uploaded code is parsed and repackaged but never executed by the website.
+- Jobs use random directories and random download tokens.
+- Temporary jobs are deleted after the configured TTL.
+- Set `APP_PASSWORD` before exposing a paid Railway deployment publicly.
+- Obfuscation makes decompiled code harder to understand; it cannot make JVM bytecode impossible to reverse engineer.

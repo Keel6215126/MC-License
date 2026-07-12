@@ -121,7 +121,7 @@ public final class JarPatcher {
         sanitizeManifest(entries);
 
         Properties markerProps = new Properties();
-        markerProps.setProperty("implementer_version", "2.0.1");
+        markerProps.setProperty("implementer_version", "3.0.0");
         markerProps.setProperty("mclicense_library_version", "1.5.1");
         markerProps.setProperty("plugin_id", pluginId);
         markerProps.setProperty("original_main", originalMain);
