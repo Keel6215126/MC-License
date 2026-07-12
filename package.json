@@ -1,0 +1,25 @@
+{
+  "name": "mc-license-implementer",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "node src/server.js",
+    "build-java": "./scripts/build-java.sh",
+    "test-patcher": "./scripts/test-patcher.sh"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Railway-hostable Minecraft plugin license implementer and license server",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "multer": "^2.2.0"
+  }
+}
