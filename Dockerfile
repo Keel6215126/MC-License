@@ -4,13 +4,14 @@ COPY java-src ./java-src
 RUN mkdir -p java-build \
     && javac --release 17 -d java-build $(find java-src -name '*.java')
 
-FROM node:22-bookworm-slim
+FROM node:22.16.0-bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openjdk-17-jre-headless ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm --version \
+    && npm ci --omit=dev --no-audit --no-fund --progress=false
 COPY src ./src
 COPY public ./public
 COPY docker-entrypoint.sh ./docker-entrypoint.sh

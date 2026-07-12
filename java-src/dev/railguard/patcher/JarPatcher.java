@@ -131,7 +131,7 @@ public final class JarPatcher {
         sanitizeManifest(entries);
 
         Properties markerProps = new Properties();
-        markerProps.setProperty("version", "1.0.0");
+        markerProps.setProperty("version", "1.0.1");
         markerProps.setProperty("product_id", productId);
         markerProps.setProperty("original_main", originalMain);
         markerProps.setProperty("wrapper_main", wrapperMain);

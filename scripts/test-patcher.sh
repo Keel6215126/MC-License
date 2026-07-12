@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+if [ ! -f "$ROOT/java-build/dev/railguard/patcher/JarPatcher.class" ]; then
+  "$ROOT/scripts/build-java.sh" >/dev/null
+fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/src/org/bukkit/plugin/java" "$TMP/src/example" "$TMP/classes"

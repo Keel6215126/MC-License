@@ -133,7 +133,7 @@ function audit(data, action, details = {}) {
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'railguard', version: '1.0.0' });
+  res.json({ ok: true, service: 'railguard', version: '1.0.1' });
 });
 
 app.get('/admin/login', (req, res) => {

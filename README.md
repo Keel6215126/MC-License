@@ -157,3 +157,7 @@ npm test
 ./scripts/test-patcher.sh
 npm start
 ```
+
+## Railway npm build fix in 1.0.1
+
+Release 1.0.1 pins the Docker runtime to `node:22.16.0-bookworm-slim`, which includes npm 10.9.2. This avoids the Railway build failure where npm 10.9.8 exits with `Exit handler never called!` during `npm ci`.

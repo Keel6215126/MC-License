@@ -1,6 +1,6 @@
 {
   "name": "mc-license-implementer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "src/server.js",
   "scripts": {
     "test": "node --test test/*.test.js",
