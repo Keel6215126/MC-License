@@ -1,6 +1,6 @@
 {
   "name": "mc-license-implementer",
-  "version": "1.0.1",
+  "version": "2.0.1",
   "main": "src/server.js",
   "scripts": {
     "test": "node --test test/*.test.js",
@@ -11,7 +11,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Railway-hostable Minecraft plugin license implementer and license server",
+  "description": "Railway-hostable tool that injects MC License 1.5.1 and required org.json runtime classes into Minecraft plugins",
   "engines": {
     "node": ">=22"
   },

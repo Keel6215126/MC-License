@@ -14,8 +14,10 @@ mkdir -p \
   "$TMP/src/org/bukkit" \
   "$TMP/src/org/mclicense/library" \
   "$TMP/src/example" \
+  "$TMP/src/org/json" \
   "$TMP/classes" \
-  "$TMP/plugin"
+  "$TMP/plugin" \
+  "$TMP/vendor"
 
 cat > "$TMP/src/org/bukkit/plugin/Plugin.java" <<'JAVA'
 package org.bukkit.plugin;
@@ -55,6 +57,12 @@ public final class MCLicense {
 }
 JAVA
 
+
+cat > "$TMP/src/org/json/JSONObject.java" <<'JAVA'
+package org.json;
+public class JSONObject { public JSONObject() {} }
+JAVA
+
 cat > "$TMP/src/example/Demo.java" <<'JAVA'
 package example;
 public final class Demo extends org.bukkit.plugin.java.JavaPlugin {
@@ -67,13 +75,15 @@ javac --release 17 -d "$TMP/classes" $(find "$TMP/src" -name '*.java')
 cp -R "$TMP/classes/example" "$TMP/plugin/"
 printf 'name: Demo\nversion: 1.0\nmain: example.Demo\n' > "$TMP/plugin/plugin.yml"
 jar --create --file "$TMP/input.jar" -C "$TMP/plugin" .
-jar --create --file "$TMP/library.jar" -C "$TMP/classes" org/mclicense
+jar --create --file "$TMP/vendor/mc-license-library.jar" -C "$TMP/classes" org/mclicense
+jar --create --file "$TMP/vendor/json.jar" -C "$TMP/classes" org/json
 
 java -cp "$ROOT/java-build" dev.railguard.patcher.JarPatcher \
-  "$TMP/input.jar" "$TMP/output.jar" 3gd7u9r4 "$TMP/library.jar" test-marker >/dev/null
+  "$TMP/input.jar" "$TMP/output.jar" 3gd7u9r4 "$TMP/vendor" test-marker >/dev/null
 
 unzip -p "$TMP/output.jar" plugin.yml | grep -q 'main: example.Demo\$MCLicense_'
 jar tf "$TMP/output.jar" | grep -q 'org/mclicense/library/MCLicense.class'
+jar tf "$TMP/output.jar" | grep -q 'org/json/JSONObject.class'
 jar tf "$TMP/output.jar" | grep -q 'META-INF/mclicense-implementer.properties'
 
 WRAPPER=$(unzip -p "$TMP/output.jar" plugin.yml | sed -n 's/^main:[[:space:]]*//p')

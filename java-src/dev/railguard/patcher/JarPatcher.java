@@ -31,7 +31,9 @@ public final class JarPatcher {
     private static final long MAX_UNCOMPRESSED_BYTES = 300L * 1024 * 1024;
     private static final int MAX_ENTRIES = 25_000;
     private static final String LIBRARY_PREFIX = "org/mclicense/library/";
+    private static final String JSON_PREFIX = "org/json/";
     private static final String LIBRARY_MAIN_CLASS = LIBRARY_PREFIX + "MCLicense.class";
+    private static final String JSON_MAIN_CLASS = JSON_PREFIX + "JSONObject.class";
     private static final String MARKER_PATH = "META-INF/mclicense-implementer.properties";
     private static final int ACC_PRIVATE = 0x0002;
     private static final int ACC_PROTECTED = 0x0004;
@@ -41,17 +43,17 @@ public final class JarPatcher {
 
     public static void main(String[] args) throws Exception {
         if (args.length != 5) {
-            System.err.println("Usage: JarPatcher <input> <output> <pluginId> <libraryJar> <marker>");
+            System.err.println("Usage: JarPatcher <input> <output> <pluginId> <dependencyDir> <marker>");
             System.exit(2);
         }
 
         Path input = Path.of(args[0]);
         Path output = Path.of(args[1]);
         String pluginId = args[2];
-        Path libraryJar = Path.of(args[3]);
+        Path dependencyDir = Path.of(args[3]);
         String marker = args[4];
 
-        PatchResult result = patch(input, output, pluginId, libraryJar, marker);
+        PatchResult result = patch(input, output, pluginId, dependencyDir, marker);
         System.out.println("{\"ok\":true,\"original_main\":\"" + json(result.originalMain) +
                 "\",\"wrapper_main\":\"" + json(result.wrapperMain) +
                 "\",\"descriptor\":\"" + json(result.descriptor) +
@@ -59,9 +61,9 @@ public final class JarPatcher {
                 ",\"signatures_removed\":" + result.signaturesRemoved + "}");
     }
 
-    public static PatchResult patch(Path input, Path output, String pluginId, Path libraryJar, String marker) throws Exception {
+    public static PatchResult patch(Path input, Path output, String pluginId, Path dependencyDir, String marker) throws Exception {
         if (!Files.isRegularFile(input)) throw new IOException("Input JAR does not exist");
-        if (!Files.isRegularFile(libraryJar)) throw new IOException("MC License library 1.5.1 is missing from the server");
+        if (!Files.isDirectory(dependencyDir)) throw new IOException("MC License runtime dependency directory is missing from the server");
         if (!pluginId.matches("[A-Za-z0-9]{8}")) throw new IOException("Plugin ID must be exactly 8 letters and numbers");
 
         Map<String, byte[]> entries = new LinkedHashMap<>();
@@ -114,12 +116,12 @@ public final class JarPatcher {
 
         entries.put(originalPath, parsed.modifiedBytes);
         entries.put(wrapperInternal + ".class", generateWrapper(wrapperInternal, originalInternal, pluginId));
-        int libraryClasses = copyLibraryClasses(libraryJar, entries);
+        int libraryClasses = copyRuntimeClasses(dependencyDir, entries);
         entries.put(descriptor, replaceMainClass(descriptorText, wrapperMain).getBytes(StandardCharsets.UTF_8));
         sanitizeManifest(entries);
 
         Properties markerProps = new Properties();
-        markerProps.setProperty("implementer_version", "2.0.0");
+        markerProps.setProperty("implementer_version", "2.0.1");
         markerProps.setProperty("mclicense_library_version", "1.5.1");
         markerProps.setProperty("plugin_id", pluginId);
         markerProps.setProperty("original_main", originalMain);
@@ -144,24 +146,40 @@ public final class JarPatcher {
         return new PatchResult(originalMain, wrapperMain, descriptor, libraryClasses, signaturesRemoved);
     }
 
-    private static int copyLibraryClasses(Path libraryJar, Map<String, byte[]> entries) throws IOException {
+    private static int copyRuntimeClasses(Path dependencyDir, Map<String, byte[]> entries) throws IOException {
         int copied = 0;
-        boolean foundMain = false;
-        try (JarFile jar = new JarFile(libraryJar.toFile(), false)) {
-            var enumeration = jar.entries();
-            while (enumeration.hasMoreElements()) {
-                JarEntry entry = enumeration.nextElement();
-                if (entry.isDirectory()) continue;
-                String name = normalizeEntryName(entry.getName());
-                if (!name.startsWith(LIBRARY_PREFIX) || !name.endsWith(".class")) continue;
-                try (InputStream in = jar.getInputStream(entry)) {
-                    entries.put(name, in.readAllBytes());
+        boolean foundLibrary = false;
+        boolean foundJson = false;
+        List<Path> jars;
+        try (var stream = Files.list(dependencyDir)) {
+            jars = stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".jar"))
+                    .sorted()
+                    .toList();
+        }
+        if (jars.isEmpty()) throw new IOException("No MC License runtime dependency JARs were found");
+
+        for (Path dependencyJar : jars) {
+            try (JarFile jar = new JarFile(dependencyJar.toFile(), false)) {
+                var enumeration = jar.entries();
+                while (enumeration.hasMoreElements()) {
+                    JarEntry entry = enumeration.nextElement();
+                    if (entry.isDirectory()) continue;
+                    String name = normalizeEntryName(entry.getName());
+                    boolean allowed = (name.startsWith(LIBRARY_PREFIX) || name.startsWith(JSON_PREFIX))
+                            && name.endsWith(".class");
+                    if (!allowed) continue;
+                    try (InputStream in = jar.getInputStream(entry)) {
+                        entries.put(name, in.readAllBytes());
+                    }
+                    copied++;
+                    if (name.equals(LIBRARY_MAIN_CLASS)) foundLibrary = true;
+                    if (name.equals(JSON_MAIN_CLASS)) foundJson = true;
                 }
-                copied++;
-                if (name.equals(LIBRARY_MAIN_CLASS)) foundMain = true;
             }
         }
-        if (!foundMain) throw new IOException("The downloaded MC License artifact does not contain MCLicense.class");
+
+        if (!foundLibrary) throw new IOException("The resolved dependencies do not contain MCLicense.class");
+        if (!foundJson) throw new IOException("The resolved dependencies do not contain org.json.JSONObject");
         return copied;
     }
 

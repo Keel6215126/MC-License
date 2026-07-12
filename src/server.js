@@ -14,7 +14,7 @@ const { implementerPage, licenseCheckPage } = require('./html');
 const ROOT = path.resolve(__dirname, '..');
 const TMP_DIR = path.resolve(process.env.TMP_DIR || path.join(ROOT, 'tmp'));
 const PORT = Number(process.env.PORT || 3000);
-const MCL_LIBRARY_JAR = path.resolve(process.env.MCL_LIBRARY_JAR || path.join(ROOT, 'vendor', 'mc-license-library-1.5.1.jar'));
+const MCL_DEPENDENCY_DIR = path.resolve(process.env.MCL_DEPENDENCY_DIR || path.join(ROOT, 'vendor'));
 
 fs.mkdirSync(TMP_DIR, { recursive: true });
 
@@ -79,8 +79,8 @@ app.post('/implement', implementLimiter, upload.single('plugin'), async (req, re
       throw new Error('The uploaded file is not a valid JAR/ZIP archive.');
     }
 
-    if (!fs.existsSync(MCL_LIBRARY_JAR)) {
-      throw new Error('MC License library 1.5.1 is missing from this deployment.');
+    if (!fs.existsSync(MCL_DEPENDENCY_DIR) || !fs.statSync(MCL_DEPENDENCY_DIR).isDirectory()) {
+      throw new Error('MC License runtime dependencies are missing from this deployment.');
     }
 
     const originalBase = path.basename(req.file.originalname, path.extname(req.file.originalname))
@@ -93,7 +93,7 @@ app.post('/implement', implementLimiter, upload.single('plugin'), async (req, re
       inputPath,
       outputPath,
       pluginId,
-      libraryJar: MCL_LIBRARY_JAR
+      dependencyDir: MCL_DEPENDENCY_DIR
     });
 
     res.download(outputPath, `${originalBase}-mclicensed.jar`, (error) => {
@@ -109,7 +109,7 @@ app.post('/implement', implementLimiter, upload.single('plugin'), async (req, re
   }
 });
 
-async function runPatcher({ inputPath, outputPath, pluginId, libraryJar }) {
+async function runPatcher({ inputPath, outputPath, pluginId, dependencyDir }) {
   const classPath = path.join(ROOT, 'java-build');
   const args = [
     '-cp', classPath,
@@ -117,7 +117,7 @@ async function runPatcher({ inputPath, outputPath, pluginId, libraryJar }) {
     inputPath,
     outputPath,
     pluginId,
-    libraryJar,
+    dependencyDir,
     crypto.randomUUID()
   ];
 
@@ -168,5 +168,5 @@ app.use((error, req, res, _next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[MC License Implementer] Listening on 0.0.0.0:${PORT}`);
-  console.log(`[MC License Implementer] Using MC License library 1.5.1 from ${MCL_LIBRARY_JAR}`);
+  console.log(`[MC License Implementer] Using MC License 1.5.1 runtime dependencies from ${MCL_DEPENDENCY_DIR}`);
 });
