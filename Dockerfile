@@ -9,9 +9,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openjdk-17-jre-headless ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm --version \
-    && npm ci --omit=dev --no-audit --no-fund --progress=false
+COPY package.json ./
+RUN npm install --omit=dev --no-audit --no-fund --progress=false
 COPY src ./src
 COPY public ./public
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
