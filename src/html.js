@@ -9,20 +9,31 @@ function esc(value) {
     .replaceAll("'", '&#39;');
 }
 
+function code(value) {
+  return `<pre><code>${esc(value.trim())}</code></pre>`;
+}
+
 function layout(title, body, options = {}) {
-  const notice = options.notice ? `<div class="notice ${esc(options.notice.type || '')}">${esc(options.notice.text)}</div>` : '';
+  const notice = options.notice
+    ? `<div class="notice ${esc(options.notice.type || '')}">${esc(options.notice.text)}</div>`
+    : '';
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${esc(title)} · RailGuard</title>
+  <meta name="description" content="Add the official MC License check to a Minecraft plugin JAR.">
+  <title>${esc(title)} · MC License Implementer</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/">RailGuard</a>
-    ${options.authenticated ? `<nav><a href="/">Implementer</a><a href="/admin">Licenses</a><form method="post" action="/admin/logout" class="inline"><input type="hidden" name="_csrf" value="${esc(options.csrf)}"><button class="link-button">Log out</button></form></nav>` : ''}
+    <a class="brand" href="/">MC License Implementer</a>
+    <nav>
+      <a href="/">Implementer</a>
+      <a href="/license-check">License Check</a>
+    </nav>
   </header>
   <main class="shell">${notice}${body}</main>
   <script src="/app.js" defer></script>
@@ -30,85 +41,167 @@ function layout(title, body, options = {}) {
 </html>`;
 }
 
-function loginPage(csrf, error = '') {
-  return layout('Admin login', `
-    <section class="auth-card">
-      <div class="eyebrow">Private dashboard</div>
-      <h1>License control center</h1>
-      <p>Sign in with the Railway <code>ADMIN_PASSWORD</code> value.</p>
-      ${error ? `<div class="notice error">${esc(error)}</div>` : ''}
-      <form method="post" action="/admin/login" class="stack">
-        <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        <label>Password<input type="password" name="password" required autofocus autocomplete="current-password"></label>
-        <button type="submit">Sign in</button>
+function implementerPage({ notice }) {
+  return layout('Implementer', `
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Official MC License integration</div>
+        <h1>Drop in your plugin. Add its plugin ID. Done.</h1>
+        <p>MC License 1.5.1 is inserted directly into the uploaded JAR. There are no modes, grace periods, custom servers, embedded customer keys, or optional behavior.</p>
+      </div>
+      <div class="status-chip">MC License library 1.5.1</div>
+    </section>
+
+    <section class="panel implement-panel">
+      <form method="post" action="/implement" enctype="multipart/form-data" class="stack" id="implement-form">
+        <label class="dropzone" id="dropzone">
+          <input type="file" name="plugin" id="plugin-file" accept=".jar,application/java-archive" required>
+          <strong>Drag and drop your Minecraft plugin JAR</strong>
+          <span id="file-label">or click to choose one — maximum 50 MB</span>
+        </label>
+
+        <label class="plugin-id-field">
+          MC License plugin ID
+          <input type="text" name="plugin_id" maxlength="8" minlength="8" pattern="[A-Za-z0-9]{8}" placeholder="3gd7u9r4" autocomplete="off" spellcheck="false" required>
+          <span class="field-help">Copy the 8-character ID from the plugin URL on your MC License dashboard.</span>
+        </label>
+
+        <button type="submit">Implement MC License and download JAR</button>
       </form>
     </section>
+
+    <section class="grid three behavior-grid">
+      <article class="panel">
+        <div class="step-number">1</div>
+        <h2>Mandatory validation</h2>
+        <p>The license is checked before the original plugin enables. The original <code>onEnable</code> only runs after a valid result.</p>
+      </article>
+      <article class="panel">
+        <div class="step-number">2</div>
+        <h2>Invalid means disabled</h2>
+        <p>If the key is missing, rejected, expired, or the check fails, Bukkit immediately disables the plugin. This cannot be changed in the website.</p>
+      </article>
+      <article class="panel">
+        <div class="step-number">3</div>
+        <h2>Only mclicense.txt</h2>
+        <p>The library creates one empty file: <code>plugins/YourPlugin/mclicense.txt</code>. The server owner places the license key inside it and restarts.</p>
+      </article>
+    </section>
+
+    <section class="panel fixed-behavior">
+      <h2>Exactly what is added</h2>
+      <ul>
+        <li>The official <code>org.mclicense:library:1.5.1</code> classes are shaded into the JAR.</li>
+        <li>A generated entry-point wrapper calls <code>MCLicense.validateKey(this, "yourPluginId")</code>.</li>
+        <li>A rejected check calls <code>Bukkit.getPluginManager().disablePlugin(this)</code> and returns immediately.</li>
+        <li>No <code>config.yml</code>, <code>license.yml</code>, cache file, offline lease, or custom setting is created.</li>
+      </ul>
+    </section>
+  `, { notice });
+}
+
+function licenseCheckPage() {
+  const maven = `<repositories>
+  <repository>
+    <id>flyte-repository-releases</id>
+    <name>Flyte Repository</name>
+    <url>https://repo.flyte.gg/releases</url>
+  </repository>
+</repositories>
+
+<dependencies>
+  <dependency>
+    <groupId>org.mclicense</groupId>
+    <artifactId>library</artifactId>
+    <version>1.5.1</version>
+    <scope>compile</scope>
+  </dependency>
+</dependencies>`;
+
+  const gradle = `repositories {
+    maven {
+        name = "flyteRepositoryReleases"
+        url = uri("https://repo.flyte.gg/releases")
+    }
+}
+
+dependencies {
+    implementation "org.mclicense:library:1.5.1"
+}`;
+
+  const gradleKts = `repositories {
+    maven {
+        name = "flyteRepositoryReleases"
+        url = uri("https://repo.flyte.gg/releases")
+    }
+}
+
+dependencies {
+    implementation("org.mclicense:library:1.5.1")
+}`;
+
+  const javaCheck = `if (!MCLicense.validateKey(this, "yourPluginId")) {
+    Bukkit.getPluginManager().disablePlugin(this);
+    return;
+}`;
+
+  const kotlinCheck = `if (!MCLicense.validateKey(this, "yourPluginId")) {
+    Bukkit.getPluginManager().disablePlugin(this)
+    return
+}`;
+
+  return layout('License Check', `
+    <article class="docs">
+      <div class="eyebrow">Integration guide</div>
+      <h1>License Check</h1>
+      <p>This page shows how to integrate MC License into your plugin.</p>
+
+      <h2 id="adding-library">Adding the library</h2>
+      <p>We offer two ways to add MC License to your plugin:</p>
+
+      <h3>Option 1 — Dependency (recommended)</h3>
+      <p>Add the following repository and dependency to your build file:</p>
+
+      <div class="tabs" data-tabs>
+        <div class="tab-list" role="tablist">
+          <button type="button" class="tab active" data-tab="maven">Maven (pom.xml)</button>
+          <button type="button" class="tab" data-tab="gradle">Gradle (build.gradle)</button>
+          <button type="button" class="tab" data-tab="gradle-kts">Gradle Kotlin DSL (build.gradle.kts)</button>
+        </div>
+        <div class="tab-panel active" data-panel="maven">${code(maven)}</div>
+        <div class="tab-panel" data-panel="gradle">${code(gradle)}</div>
+        <div class="tab-panel" data-panel="gradle-kts">${code(gradleKts)}</div>
+      </div>
+
+      <h3>Option 2 — Single class (copy/paste)</h3>
+      <p>If you are having trouble shading the library into your plugin, or prefer not to manage external dependencies, copy a single class directly into your project instead. Open the <a class="text-link" href="https://github.com/flytegg/mcl-library-one-class" target="_blank" rel="noreferrer">mcl-library-one-class repository</a> and copy either <code>MCLicense.java</code> or <code>MCLicense.kt</code> into your project.</p>
+      <p>No shading is needed. All required dependencies are already on the Paper server classpath at runtime. With the single-class approach, you must manually check the repository for updates instead of bumping a dependency version.</p>
+
+      <h2 id="checking-license">Checking a license</h2>
+      <p>Each license check requires the <code>pluginId</code> and the license key. The <code>pluginId</code> uniquely identifies your plugin. The user places their license key in the <code>mclicense.txt</code> file inside your plugin folder; the library creates that empty file automatically.</p>
+      <p>Find the plugin ID by opening the plugin on your MC License dashboard and copying the random string from the URL. It looks like <code>3gd7u9r4</code> and is exactly 8 characters.</p>
+      <p>Add the following check at the beginning of your <code>onEnable</code>:</p>
+
+      <div class="tabs" data-tabs>
+        <div class="tab-list" role="tablist">
+          <button type="button" class="tab active" data-tab="java">Java</button>
+          <button type="button" class="tab" data-tab="kotlin">Kotlin</button>
+        </div>
+        <div class="tab-panel active" data-panel="java">${code(javaCheck)}</div>
+        <div class="tab-panel" data-panel="kotlin">${code(kotlinCheck)}</div>
+      </div>
+
+      <p><code>validateKey</code> returns a Boolean. If the key is invalid, the plugin is disabled and returns immediately. If the key is valid, the plugin continues loading. The library handles successful and rejected console logging.</p>
+
+      <div class="callout">
+        <strong>The online implementer always uses this exact behavior.</strong>
+        <span>There are no optional modes. It always blocks startup after a failed validation and only creates the empty <code>mclicense.txt</code> file.</span>
+      </div>
+
+      <h2>Not building a Minecraft plugin?</h2>
+      <p>MC License is not limited to Minecraft plugins. Other software can use the MC License HTTP API directly.</p>
+    </article>
   `);
 }
 
-function implementerPage({ csrf, products, publicBaseUrl, publicKeyB64, notice }) {
-  const active = products.filter((p) => p.active);
-  const options = active.length
-    ? active.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.slug)})</option>`).join('')
-    : '<option value="">Create an active product first</option>';
-  return layout('Plugin implementer', `
-    <section class="hero">
-      <div><div class="eyebrow">Minecraft plugin licensing</div><h1>Drop a plugin in. Download it licensed.</h1>
-      <p>The uploaded JAR is never executed. RailGuard changes its plugin entry point, injects a signed validation gate, and returns a new JAR.</p></div>
-      <div class="status-chip">Ed25519 signed responses</div>
-    </section>
-
-    <section class="panel">
-      <form method="post" action="/patch" enctype="multipart/form-data" class="stack" id="patch-form">
-        <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        <label class="dropzone" id="dropzone">
-          <input type="file" name="plugin" id="plugin-file" accept=".jar,application/java-archive" required>
-          <strong>Drag and drop a plugin JAR</strong>
-          <span id="file-label">or click to choose one — maximum 50 MB</span>
-        </label>
-        <div class="grid two">
-          <label>License product<select name="product_id" required ${active.length ? '' : 'disabled'}>${options}</select></label>
-          <label>Public license-server URL<input type="url" name="api_url" value="${esc(publicBaseUrl)}" required></label>
-          <label>License-key mode<select name="key_mode" id="key-mode"><option value="config">Customer enters key in license.yml</option><option value="embedded">Embed one specific key</option></select></label>
-          <label id="embedded-wrap" hidden>License key to embed<input type="text" name="embedded_key" placeholder="RG-XXXXX-XXXXX-XXXXX-XXXXX"></label>
-          <label>Requested offline grace (hours)<input type="number" name="grace_hours" min="0" max="720" value="24" required></label>
-          <label>Connection timeout (milliseconds)<input type="number" name="timeout_ms" min="1000" max="15000" value="4000" required></label>
-        </div>
-        <button type="submit" ${active.length ? '' : 'disabled'}>Implement license and download JAR</button>
-      </form>
-    </section>
-
-    <section class="grid two info-grid">
-      <article class="panel"><h2>What gets added</h2><p>A generated wrapper main class, a JDK-only verifier, a runtime <code>license.yml</code>, signed cached leases, activation limits, expiration checks, and revocation support.</p></article>
-      <article class="panel"><h2>Signing public key</h2><p class="mono break">${esc(publicKeyB64)}</p><p class="muted">This key is embedded in patched JARs. Keep the private key files in your Railway volume.</p></article>
-    </section>
-  `, { authenticated: true, csrf, notice });
-}
-
-function adminPage({ csrf, products, licenses, activations, baseUrl, notice }) {
-  const productRows = products.length ? products.map((p) => {
-    const licenseCount = licenses.filter((l) => l.productId === p.id).length;
-    return `<tr><td><strong>${esc(p.name)}</strong><div class="muted">${esc(p.slug)}</div></td><td>${licenseCount}</td><td>${p.maxActivations}</td><td>${p.maxOfflineHours}h</td><td><span class="pill ${p.active ? 'good' : 'bad'}">${p.active ? 'Active' : 'Disabled'}</span></td><td><form method="post" action="/admin/products/${esc(p.id)}/toggle"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="small secondary">${p.active ? 'Disable' : 'Enable'}</button></form></td></tr>`;
-  }).join('') : '<tr><td colspan="6" class="muted">No products yet.</td></tr>';
-
-  const licenseRows = licenses.length ? licenses.slice().reverse().map((l) => {
-    const product = products.find((p) => p.id === l.productId);
-    const count = activations.filter((a) => a.licenseId === l.id).length;
-    return `<tr><td><button class="copy-key mono" data-copy="${esc(l.key)}" title="Copy key">${esc(l.key)}</button><div class="muted">${esc(l.customer || 'Unassigned')}</div></td><td>${esc(product?.name || 'Deleted product')}</td><td>${count}/${l.maxActivations ?? product?.maxActivations ?? 1}</td><td>${l.expiresAt ? esc(new Date(l.expiresAt).toLocaleDateString()) : 'Never'}</td><td><span class="pill ${l.active ? 'good' : 'bad'}">${l.active ? 'Active' : 'Revoked'}</span></td><td class="actions"><form method="post" action="/admin/licenses/${esc(l.id)}/toggle"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="small secondary">${l.active ? 'Revoke' : 'Restore'}</button></form><form method="post" action="/admin/licenses/${esc(l.id)}/reset"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="small secondary">Reset activations</button></form></td></tr>`;
-  }).join('') : '<tr><td colspan="6" class="muted">No licenses yet.</td></tr>';
-
-  const productOptions = products.filter((p) => p.active).map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-  return layout('License dashboard', `
-    <section class="hero compact"><div><div class="eyebrow">Administration</div><h1>Products and license keys</h1><p>Validation endpoint: <code>${esc(baseUrl)}/api/v1/validate</code></p></div><div class="metrics"><span><strong>${products.length}</strong> products</span><span><strong>${licenses.length}</strong> licenses</span><span><strong>${activations.length}</strong> activations</span></div></section>
-
-    <section class="grid two">
-      <article class="panel"><h2>Create product</h2><form method="post" action="/admin/products" class="stack"><input type="hidden" name="_csrf" value="${esc(csrf)}"><label>Name<input name="name" maxlength="80" required placeholder="Quasar SMP"></label><label>Slug<input name="slug" maxlength="60" required pattern="[a-z0-9-]+" placeholder="quasar-smp"></label><div class="grid two"><label>Default max activations<input type="number" name="max_activations" min="1" max="1000" value="1" required></label><label>Maximum offline hours<input type="number" name="max_offline_hours" min="0" max="720" value="24" required></label></div><button>Create product</button></form></article>
-      <article class="panel"><h2>Issue license</h2><form method="post" action="/admin/licenses" class="stack"><input type="hidden" name="_csrf" value="${esc(csrf)}"><label>Product<select name="product_id" required>${productOptions || '<option value="">Create a product first</option>'}</select></label><label>Customer / note<input name="customer" maxlength="120" placeholder="Customer name or order ID"></label><div class="grid two"><label>Activation override<input type="number" name="max_activations" min="1" max="1000" placeholder="Use product default"></label><label>Expiration<input type="date" name="expires_at"></label></div><button ${productOptions ? '' : 'disabled'}>Generate license key</button></form></article>
-    </section>
-
-    <section class="panel"><div class="section-head"><h2>Products</h2></div><div class="table-wrap"><table><thead><tr><th>Product</th><th>Licenses</th><th>Activations</th><th>Offline</th><th>Status</th><th></th></tr></thead><tbody>${productRows}</tbody></table></div></section>
-    <section class="panel"><div class="section-head"><h2>License keys</h2><span class="muted">Click a key to copy it</span></div><div class="table-wrap"><table><thead><tr><th>Key / customer</th><th>Product</th><th>Uses</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead><tbody>${licenseRows}</tbody></table></div></section>
-  `, { authenticated: true, csrf, notice });
-}
-
-module.exports = { esc, layout, loginPage, implementerPage, adminPage };
+module.exports = { esc, layout, implementerPage, licenseCheckPage };
