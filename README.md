@@ -1,82 +1,110 @@
-# RailGuard — Railway Minecraft Plugin License Implementer
+# MC License Implementer
 
-RailGuard is a self-hosted web dashboard that takes a standard Bukkit, Spigot, or Paper plugin JAR and returns a licensed build.
+A Railway-hostable web tool that adds the official MC License library to an existing Bukkit, Spigot, or Paper plugin JAR.
 
-You drag in a JAR, choose a product, choose whether the customer enters a key in `license.yml` or receives a key embedded in the JAR, and download the modified plugin.
+The website has one fixed workflow:
 
-## Included
+1. Upload a Minecraft plugin JAR.
+2. Enter the plugin's 8-character MC License plugin ID.
+3. Download the protected JAR.
 
-- Drag-and-drop JAR implementer
-- Product and license-key dashboard
-- Activation limits
-- License expiration and revocation
-- Activation reset
-- Ed25519-signed validation responses
-- Signed offline lease cache with configurable grace period
-- Persistent instance IDs
-- Clock rollback check for cached leases
-- Runtime `license.yml` generation
-- Railway-ready Dockerfile and health check
-- No execution of uploaded plugin code
-- No Maven, Gradle, ASM, or external Java library required
+There are no license modes or behavior settings.
 
-## How the JAR patching works
+## Fixed runtime behavior
 
-1. RailGuard reads `plugin.yml` or `paper-plugin.yml` and locates the `main` class.
-2. It removes `final` from that class and its `onEnable()` method when necessary.
-3. It creates a tiny generated subclass in the same package.
-4. The descriptor's `main` value is changed to the generated subclass.
-5. The generated class validates the license before calling the original `onEnable()`.
-6. A JDK-only verifier and a RailGuard marker are added to the JAR.
+The generated plugin entry point always performs this check before the original plugin enables:
 
-The uploaded plugin is parsed as an archive and class file. It is never loaded or executed by the web service.
+```java
+if (!MCLicense.validateKey(this, "yourPluginId")) {
+    Bukkit.getPluginManager().disablePlugin(this);
+    return;
+}
+```
+
+That means:
+
+- A valid license allows the original `onEnable()` to run.
+- A missing, invalid, expired, rejected, or failed license check disables the plugin immediately.
+- The only runtime file created by MC License is an empty `mclicense.txt` inside the plugin's data folder.
+- The server owner places their license key directly inside `mclicense.txt` and restarts the server.
+- No `config.yml`, `license.yml`, offline cache, grace-period file, instance file, or custom licensing configuration is created.
+
+## What the implementer adds
+
+- Official `org.mclicense:library:1.5.1` classes
+- A generated wrapper entry point
+- The supplied 8-character MC License plugin ID
+- A small `META-INF/mclicense-implementer.properties` build marker
+
+The uploaded plugin is read as a ZIP/JAR archive and class file. It is never executed by the website.
+
+## MC License dependency
+
+Maven:
+
+```xml
+<repositories>
+  <repository>
+    <id>flyte-repository-releases</id>
+    <name>Flyte Repository</name>
+    <url>https://repo.flyte.gg/releases</url>
+  </repository>
+</repositories>
+
+<dependencies>
+  <dependency>
+    <groupId>org.mclicense</groupId>
+    <artifactId>library</artifactId>
+    <version>1.5.1</version>
+    <scope>compile</scope>
+  </dependency>
+</dependencies>
+```
+
+Gradle:
+
+```groovy
+repositories {
+    maven {
+        name = "flyteRepositoryReleases"
+        url = uri("https://repo.flyte.gg/releases")
+    }
+}
+
+dependencies {
+    implementation "org.mclicense:library:1.5.1"
+}
+```
+
+Gradle Kotlin DSL:
+
+```kotlin
+repositories {
+    maven {
+        name = "flyteRepositoryReleases"
+        url = uri("https://repo.flyte.gg/releases")
+    }
+}
+
+dependencies {
+    implementation("org.mclicense:library:1.5.1")
+}
+```
+
+The single-class alternative is available from `flytegg/mcl-library-one-class` on GitHub.
 
 ## Railway deployment
 
-### 1. Put the project in GitHub
+1. Connect this repository to a Railway service.
+2. Railway uses the root `Dockerfile`.
+3. Generate a public domain.
+4. Open the website and upload a plugin.
 
-Upload this entire folder to a private GitHub repository.
+No database, admin password, session secret, signing key, custom validation server, or persistent volume is required.
 
-### 2. Create the Railway service
+The Docker build downloads MC License library 1.5.1 from the Flyte repository and verifies that `org/mclicense/library/MCLicense.class` exists before completing.
 
-Create a Railway project and deploy the GitHub repository. Railway automatically detects the root `Dockerfile`; `railway.toml` sets `/health` as the deployment health check.
-
-### 3. Set variables
-
-Set at least:
-
-```text
-ADMIN_PASSWORD=use-a-long-random-password
-SESSION_SECRET=use-at-least-32-random-characters
-```
-
-Optional custom-domain setting:
-
-```text
-PUBLIC_BASE_URL=https://licenses.yourdomain.com
-```
-
-When `PUBLIC_BASE_URL` is omitted, the app uses Railway's `RAILWAY_PUBLIC_DOMAIN` when available.
-
-### 4. Add a persistent Railway Volume
-
-Attach one volume to the service and mount it at:
-
-```text
-/data
-```
-
-The volume stores:
-
-- `database.json`
-- Ed25519 private and public signing keys
-- Session secret when one was not supplied
-
-Do not deploy multiple replicas against this JSON store. This build is intentionally designed for one Railway service instance with one persistent volume.
-
-### 5. Generate a public domain
-
-Open Railway Networking and generate a public domain. Visit it, sign in using `ADMIN_PASSWORD`, create a product, issue a key, and patch a plugin.
+The committed lockfile contains registry URLs from the original build environment. The Dockerfile rewrites that registry prefix to `https://registry.npmjs.org/` before running deterministic `npm ci`.
 
 ## Local development
 
@@ -84,80 +112,30 @@ Requirements:
 
 - Node.js 22+
 - JDK 17+
-- `jar` and `javac` on `PATH`
+- `javac`, `java`, and `jar` on `PATH`
+- MC License library 1.5.1 stored at `vendor/mc-license-library-1.5.1.jar`
 
 ```bash
-cp .env.example .env
-npm install
+npm ci
 ./scripts/build-java.sh
-ADMIN_PASSWORD=change-this SESSION_SECRET=replace-with-a-long-random-value npm start
+npm start
 ```
 
 Open `http://localhost:3000`.
 
-## Customer installation
-
-### Config-key mode
-
-1. Put the downloaded licensed JAR in the server's `plugins` folder.
-2. Start the server once.
-3. RailGuard creates `plugins/<PluginName>/license.yml`.
-4. Replace `CHANGE-ME` with the issued key.
-5. Restart the server.
-
-Example:
-
-```yaml
-license-key: RG-ABCDE-FGHIJ-KLMNP-QRSTU
-```
-
-### Embedded-key mode
-
-The selected key is stored in the patched JAR. The customer only installs the JAR. Use this for a build issued to one specific customer.
-
-## Validation behavior
-
-At plugin enable, the injected runtime sends:
-
-- Product ID
-- License key
-- Persistent random instance ID
-- Plugin version
-- Server version
-- Random nonce
-- Requested offline grace period
-
-RailGuard replies with an Ed25519-signed payload. The plugin contains only the public key, so it can verify responses but cannot create valid responses itself.
-
-A successful response is cached. When the license server is unreachable, the plugin can use that signed cache until `offline_until`. Revocation therefore becomes fully effective after the configured offline window.
-
-## Compatibility and limits
-
-- Java 17 or newer is required by the injected runtime.
-- Standard Bukkit, Spigot, and Paper plugin descriptors are supported.
-- The main plugin class must have a zero-argument constructor, as normal JavaPlugin classes do.
-- Existing JAR signature files are removed because any JAR modification invalidates them.
-- BungeeCord, Waterfall, and Velocity descriptors are not supported in this release.
-- Paper bootstrap or loader code may execute before `onEnable`; RailGuard protects the normal enable phase.
-- Licensing inside distributable JVM bytecode is a deterrent, not mathematically unbreakable DRM. A determined attacker can alter client-side checks. Keep sensitive server-side functionality behind APIs when possible.
-
-## Security notes
-
-- Use HTTPS in production. The production patch form rejects non-HTTPS license URLs.
-- Keep `/data/ed25519-private.pem` private and backed up.
-- Use a long random admin password.
-- Keep the dashboard private when practical.
-- Do not expose a deployment without a persistent `/data` volume; regenerated signing keys would make old patched JARs reject new responses.
-
-## Commands
+## Tests
 
 ```bash
 npm test
-./scripts/build-java.sh
 ./scripts/test-patcher.sh
-npm start
 ```
 
-## Railway npm build fix in 1.0.1
+The patcher test confirms that a failed validation disables the plugin and prevents the original `onEnable()` from running.
 
-Release 1.0.1 pins the Docker runtime to `node:22.16.0-bookworm-slim`, which includes npm 10.9.2. This avoids the Railway build failure where npm 10.9.8 exits with `Exit handler never called!` during `npm ci`.
+## Compatibility
+
+- Supports standard `plugin.yml` and `paper-plugin.yml` main entries.
+- Supports final Java or Kotlin plugin main classes and final `onEnable()` methods.
+- The plugin main class must have a zero-argument constructor, as normal `JavaPlugin` classes do.
+- Existing JAR signature files are removed because modifying a JAR invalidates them.
+- BungeeCord, Waterfall, and Velocity plugin descriptors are not supported.
