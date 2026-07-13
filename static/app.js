@@ -33,8 +33,8 @@ document.addEventListener("DOMContentLoaded", () => {
         protect: "ProGuard strongly renames and repackages the licensed plugin, then the site verifies the MC License runtime survived."
       },
       skid: {
-        description: "Community flow, number, and string transformations; structural renaming is not included.",
-        obfuscate: "Skidfuscator Community applies control-flow and constant/string transformations. A renamed-class count of zero is expected.",
+        description: "Community flow and number transformations; structural renaming is not included.",
+        obfuscate: "Skidfuscator Community applies control-flow and number transformations. A renamed-class count of zero is expected.",
         protect: "Skidfuscator Community hardens the licensed plugin's method bodies without renaming its classes, then the license runtime is verified."
       },
       yguard: {

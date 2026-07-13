@@ -316,7 +316,7 @@ def health():
     healthy = dependencies_ready and all(engine_status.values())
     return jsonify({
         "status": "ok" if healthy else "degraded",
-        "version": "3.1.0",
+        "version": "3.1.1",
         "jobs": len(jobs),
         "max_parallel_jobs": MAX_PARALLEL_JOBS,
         "mclicense_dependencies": dependencies_ready,

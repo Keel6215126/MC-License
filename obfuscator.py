@@ -612,11 +612,7 @@ def _run_proguard_obfuscation(
     log_file = work_dir / "proguard.log"
 
     command = _resolve_proguard_command() + [f"@{config_file}"]
-    env = os.environ.copy()
-    max_heap_mb = max(128, int(os.environ.get("JAVA_MAX_HEAP_MB", "512")))
-    java_options = env.get("JAVA_TOOL_OPTIONS", "")
-    if "-Xmx" not in java_options:
-        env["JAVA_TOOL_OPTIONS"] = (java_options + f" -Xmx{max_heap_mb}m").strip()
+    env = _java_environment()
 
     started = time.monotonic()
     try:
@@ -710,12 +706,33 @@ def engine_display_name(engine: str) -> str:
     }[normalize_engine(engine)]
 
 
-def _java_environment() -> dict[str, str]:
+def _environment_int(name: str, default: int, minimum: int = 128) -> int:
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = default
+    return max(minimum, value)
+
+
+def _java_environment(max_heap_mb: int | None = None) -> dict[str, str]:
+    """Return a deterministic JVM environment with one explicit heap limit.
+
+    JAVA_TOOL_OPTIONS may already contain an -Xmx value supplied by Railway or a
+    local shell. Remove it before applying the per-engine value so Skidfuscator
+    cannot accidentally remain capped at the generic 512 MB default.
+    """
     env = os.environ.copy()
-    max_heap_mb = max(128, int(os.environ.get("JAVA_MAX_HEAP_MB", "512")))
+    if max_heap_mb is None:
+        max_heap_mb = _environment_int("JAVA_MAX_HEAP_MB", 512)
     java_options = env.get("JAVA_TOOL_OPTIONS", "")
-    if "-Xmx" not in java_options:
-        env["JAVA_TOOL_OPTIONS"] = (java_options + f" -Xmx{max_heap_mb}m").strip()
+    java_options = re.sub(r"(?:^|\s)-Xmx\S+", " ", java_options).strip()
+    options = [java_options] if java_options else []
+    options.extend([
+        f"-Xmx{max_heap_mb}m",
+        "-XX:+ExitOnOutOfMemoryError",
+    ])
+    env["JAVA_TOOL_OPTIONS"] = " ".join(options)
     return env
 
 
@@ -725,13 +742,17 @@ def _run_command(
     log_file: Path,
     timeout_seconds: int,
     tool_name: str,
+    *,
+    environment: dict[str, str] | None = None,
+    check: bool = True,
+    append_log: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], float]:
     started = time.monotonic()
     try:
         completed = subprocess.run(
             command,
             cwd=work_dir,
-            env=_java_environment(),
+            env=environment or _java_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -743,14 +764,35 @@ def _run_command(
         output = exc.stdout or ""
         if isinstance(output, bytes):
             output = output.decode("utf-8", errors="replace")
-        log_file.write_text(output + f"\nERROR: {tool_name} timed out.\n", encoding="utf-8")
+        mode = "a" if append_log else "w"
+        with log_file.open(mode, encoding="utf-8") as handle:
+            handle.write(output + f"\nERROR: {tool_name} timed out.\n")
         raise ObfuscationError(f"{tool_name} exceeded the {timeout_seconds}-second time limit.") from exc
     elapsed = time.monotonic() - started
-    log_file.write_text(completed.stdout or "", encoding="utf-8")
-    if completed.returncode != 0:
+    mode = "a" if append_log else "w"
+    with log_file.open(mode, encoding="utf-8") as handle:
+        handle.write(completed.stdout or "")
+    if check and completed.returncode != 0:
         tail = "\n".join((completed.stdout or "").splitlines()[-32:])
         raise ObfuscationError(f"{tool_name} failed with exit code {completed.returncode}.\n{tail}")
     return completed, elapsed
+
+
+def _skid_heap_mb() -> int:
+    return _environment_int("SKID_MAX_HEAP_MB", 1536, minimum=512)
+
+
+def _skid_failure_reasons(output: str) -> list[str]:
+    reasons: list[str] = []
+    if "OutOfMemoryError" in output or "Java heap space" in output:
+        reasons.append("java_heap_exhausted")
+    if "BoissinotDestructor" in output or "leaveSSA" in output:
+        reasons.append("mapleir_ssa_failure")
+    if "StringTransformerV2" in output or "AbstractEncryptionGeneratorV3" in output:
+        reasons.append("v3_string_transformer_failure")
+    if not reasons:
+        reasons.append("unknown_engine_failure")
+    return reasons
 
 
 def _resolve_skid_command() -> list[str]:
@@ -821,15 +863,38 @@ def _hocon_quote(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def generate_skid_config(work_dir: Path, inspection: JarInspection, mode: str) -> Path:
+def generate_skid_config(
+    work_dir: Path,
+    inspection: JarInspection,
+    mode: str,
+    profile: str = "stable",
+) -> Path:
     if mode not in {"safe", "strong"}:
         raise ObfuscationError("Mode must be 'safe' or 'strong'.")
-    config_file = work_dir / "skidfuscator-config.conf"
+    if profile not in {"stable", "compatibility", "experimental"}:
+        raise ObfuscationError("Unknown Skidfuscator profile.")
+
+    suffix = "" if profile == "stable" else f"-{profile}"
+    config_file = work_dir / f"skidfuscator-config{suffix}.conf"
     exemptions: list[str] = []
-    if mode == "safe":
+    if mode == "safe" or profile == "compatibility":
         for class_name in inspection.entry_classes:
             internal = re.escape(class_name.replace(".", "/"))
             exemptions.append(f"class{{^{internal}$}}")
+
+    # Skidfuscator's V3 string generator currently routes generated byte-array
+    # methods through MapleIR's SSA destructor. Some normal Java 21 plugin methods
+    # trigger an unbounded/invalid graph there. Keep it off by default; it can be
+    # explicitly re-enabled for testing with SKID_EXPERIMENTAL_STRING_ENCRYPTION.
+    experimental_strings = (
+        profile == "experimental"
+        or os.environ.get("SKID_EXPERIMENTAL_STRING_ENCRYPTION", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    compatibility = profile == "compatibility"
+    exception_enabled = mode == "strong" and not compatibility
+    range_enabled = mode == "strong" and not compatibility
+
     lines = ["exempt=["]
     for index, pattern in enumerate(exemptions):
         comma = "," if index < len(exemptions) - 1 else ""
@@ -840,11 +905,11 @@ def generate_skid_config(work_dir: Path, inspection: JarInspection, mode: str) -
         "    enabled=true",
         "}",
         "flowException {",
-        f"    enabled={'false' if mode == 'safe' else 'true'}",
-        f"    strength={'WEAK' if mode == 'safe' else 'AGGRESSIVE'}",
+        f"    enabled={'true' if exception_enabled else 'false'}",
+        f"    strength={'GOOD' if exception_enabled else 'WEAK'}",
         "}",
         "flowRange {",
-        "    enabled=true",
+        f"    enabled={'true' if range_enabled else 'false'}",
         "}",
         "native {",
         "    enabled=false",
@@ -853,7 +918,7 @@ def generate_skid_config(work_dir: Path, inspection: JarInspection, mode: str) -
         "    enabled=true",
         "}",
         "stringEncryption {",
-        "    enabled=true",
+        f"    enabled={'true' if experimental_strings else 'false'}",
         "    type=STANDARD",
         "}",
         "",
@@ -890,22 +955,105 @@ def _run_skid_obfuscation(
     work_dir.mkdir(parents=True, exist_ok=True)
     output_jar = work_dir / output_name
     inspection = inspect_jar(input_jar)
-    config_file = generate_skid_config(work_dir, inspection, mode)
     log_file = work_dir / "skidfuscator.log"
     library_dir = _prepare_library_directory(work_dir, library_jars)
-    command = _resolve_skid_command() + [
-        "obfuscate",
-        str(input_jar.resolve()),
-        "-o",
-        str(output_jar.resolve()),
-        "-cfg",
-        str(config_file.resolve()),
-        "-ph",
-        "-notrack",
-    ]
-    if library_dir:
-        command.extend(["-li", str(library_dir.resolve())])
-    completed, elapsed = _run_command(command, work_dir, log_file, timeout_seconds, "Skidfuscator")
+    heap_mb = _skid_heap_mb()
+    auto_retry = os.environ.get("SKID_AUTO_COMPATIBILITY_RETRY", "true").strip().lower() not in {
+        "0", "false", "no", "off"
+    }
+
+    primary_profile = (
+        "experimental"
+        if os.environ.get("SKID_EXPERIMENTAL_STRING_ENCRYPTION", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+        else "stable"
+    )
+    profiles = [primary_profile]
+    if auto_retry and primary_profile != "compatibility":
+        profiles.append("compatibility")
+
+    attempts: list[dict[str, Any]] = []
+    completed: subprocess.CompletedProcess[str] | None = None
+    config_file: Path | None = None
+    elapsed = 0.0
+
+    for attempt_number, profile in enumerate(profiles, start=1):
+        config_file = generate_skid_config(work_dir, inspection, mode, profile=profile)
+        if output_jar.exists():
+            output_jar.unlink()
+        command = _resolve_skid_command() + [
+            "obfuscate",
+            str(input_jar.resolve()),
+            "-o",
+            str(output_jar.resolve()),
+            "-cfg",
+            str(config_file.resolve()),
+            "-ph",
+            "-notrack",
+        ]
+        if library_dir:
+            command.extend(["-li", str(library_dir.resolve())])
+
+        with log_file.open("a" if attempt_number > 1 else "w", encoding="utf-8") as handle:
+            handle.write(
+                f"\n===== Skidfuscator attempt {attempt_number}: profile={profile}, "
+                f"heap={heap_mb}m =====\n"
+            )
+        try:
+            current, current_elapsed = _run_command(
+                command,
+                work_dir,
+                log_file,
+                timeout_seconds,
+                "Skidfuscator",
+                environment=_java_environment(heap_mb),
+                check=False,
+                append_log=True,
+            )
+            output_text = current.stdout or ""
+            return_code = current.returncode
+        except ObfuscationError as exc:
+            current = None
+            current_elapsed = 0.0
+            output_text = str(exc)
+            return_code = -1
+
+        elapsed += current_elapsed
+        reasons = _skid_failure_reasons(output_text)
+        success = return_code == 0 and output_jar.is_file() and output_jar.stat().st_size > 0
+        attempts.append({
+            "attempt": attempt_number,
+            "profile": profile,
+            "heap_mb": heap_mb,
+            "exit_code": return_code,
+            "success": success,
+            "failure_reasons": [] if success else reasons,
+        })
+        if success:
+            completed = current
+            break
+
+        with log_file.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\nCompatibility retry will disable V3 string encryption, "
+                "exception flow, and range flow.\n"
+                if attempt_number < len(profiles)
+                else "\nNo Skidfuscator attempts remain.\n"
+            )
+
+    if completed is None or config_file is None:
+        log_text = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
+        tail = "\n".join(log_text.splitlines()[-36:])
+        all_reasons = sorted({reason for attempt in attempts for reason in attempt["failure_reasons"]})
+        advice = (
+            f" Skidfuscator was given a {heap_mb} MB heap. Increase the Railway service memory "
+            "and SKID_MAX_HEAP_MB if java_heap_exhausted remains in the reasons."
+            if "java_heap_exhausted" in all_reasons else ""
+        )
+        raise ObfuscationError(
+            "Skidfuscator failed after its stable and compatibility attempts "
+            f"({', '.join(all_reasons) or 'unknown failure'}).{advice}\n{tail}"
+        )
 
     mapping_file = work_dir / "mapping.txt"
     _write_identity_mapping(mapping_file, inspection.entry_classes)
@@ -925,7 +1073,11 @@ def _run_skid_obfuscation(
         "removed_signature_entries": inspection.signed_entries_removed,
         "elapsed_seconds": round(elapsed, 3),
         "exit_code": completed.returncode,
-        "community_edition_note": "Community Skidfuscator applies flow and constant/string transformations; structural renaming is not included.",
+        "skid_heap_mb": heap_mb,
+        "attempts": attempts,
+        "compatibility_retry_used": len(attempts) > 1,
+        "v3_string_encryption_enabled": any(attempt["profile"] == "experimental" for attempt in attempts),
+        "community_edition_note": "Community Skidfuscator applies flow and constant transformations; structural renaming is not included.",
     }
     report_file = work_dir / "report.json"
     report_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

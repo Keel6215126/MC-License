@@ -1,4 +1,4 @@
-# Minecraft Plugin Protector 3.1.0
+# Minecraft Plugin Protector 3.1.1
 
 A Railway-hostable website combining:
 
@@ -23,12 +23,12 @@ The existing universal ProGuard integration remains available. It detects common
 
 ### Skidfuscator Community
 
-The Docker image downloads the current `skidfuscator.jar` release during the Railway build. The website runs it non-interactively with analytics disabled, phantom dependency handling enabled, and generated HOCON presets.
+The Docker image downloads the current `skidfuscator.jar` release during the Railway build. The website runs it non-interactively with analytics disabled, phantom dependency handling enabled, and generated HOCON presets. Stable presets intentionally disable the V3 string transformer because it can fail inside MapleIR's SSA destructor on valid Java 21 plugin methods. Strong mode still uses condition, exception, range, and number transforms. A failed run is retried once with the compatibility flow preset.
 
-- **Strong:** condition, exception, range, number, and string transformations
+- **Strong:** condition, exception, range, and number transformations
 - **Safe:** preserves detected entry classes and disables exception-flow transformation
 
-The community edition focuses on control-flow and constant/string protection. Structural class/member renaming is not included, so a renamed-class count of zero is expected.
+The community edition focuses on control-flow and number protection in the stable website presets. Structural class/member renaming is not included, so a renamed-class count of zero is expected.
 
 ### yGuard
 
@@ -74,6 +74,9 @@ LICENSE_TIMEOUT_SECONDS=45
 MAX_PARALLEL_JOBS=1
 MAX_QUEUED_JOBS=20
 JAVA_MAX_HEAP_MB=512
+SKID_MAX_HEAP_MB=1536
+SKID_AUTO_COMPATIBILITY_RETRY=true
+SKID_EXPERIMENTAL_STRING_ENCRYPTION=false
 ```
 
 The Dockerfile sets these tool paths automatically:
@@ -102,7 +105,7 @@ python3 app.py
 - Temporary jobs are deleted after the configured TTL.
 - Set `APP_PASSWORD` before exposing a paid Railway deployment publicly.
 - Obfuscation cannot make JVM bytecode impossible to reverse engineer.
-- Skidfuscator and yGuard can be less compatible with reflection-heavy plugins than ProGuard. Use safe mode and provide dependency JARs when appropriate.
+- Skidfuscator and yGuard can be less compatible with reflection-heavy plugins than ProGuard. Use safe mode and provide dependency JARs when appropriate. Allocate at least 2 GB of Railway service memory when using Skidfuscator; its default Java heap is 1536 MB.
 
 ## Discord webhook upload forwarding
 

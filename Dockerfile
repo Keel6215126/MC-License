@@ -79,6 +79,9 @@ ENV PYTHONUNBUFFERED=1 \
     JOB_TTL_MINUTES=60 \
     OBFUSCATION_TIMEOUT_SECONDS=240 \
     LICENSE_TIMEOUT_SECONDS=45 \
-    JAVA_MAX_HEAP_MB=512
+    JAVA_MAX_HEAP_MB=512 \
+    SKID_MAX_HEAP_MB=1536 \
+    SKID_AUTO_COMPATIBILITY_RETRY=true \
+    SKID_EXPERIMENTAL_STRING_ENCRYPTION=false
 EXPOSE 8080
 CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 0 --access-logfile - --error-logfile - app:app"]

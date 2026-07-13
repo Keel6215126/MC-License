@@ -11,6 +11,8 @@ from obfuscator import (
     _rewrite_manifest,
     _rewrite_service_resource,
     _rewrite_yaml,
+    _java_environment,
+    _skid_failure_reasons,
     generate_skid_config,
     generate_yguard_build,
     inspect_jar,
@@ -84,6 +86,43 @@ class ObfuscatorTests(unittest.TestCase):
             self.assertIn(r"class{^com/example/DemoPlugin$}", config)
             self.assertIn("flowException", config)
             self.assertIn("enabled=false", config)
+
+
+    def test_skid_stable_config_disables_v3_strings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inspection = inspect_jar(self._plugin_jar(Path(directory) / "plugin.jar"))
+            config = generate_skid_config(Path(directory), inspection, "strong").read_text(encoding="utf-8")
+            self.assertIn("stringEncryption {\n    enabled=false", config)
+            self.assertIn("strength=GOOD", config)
+
+    def test_skid_compatibility_profile_disables_risky_flow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inspection = inspect_jar(self._plugin_jar(Path(directory) / "plugin.jar"))
+            config = generate_skid_config(Path(directory), inspection, "strong", profile="compatibility").read_text(encoding="utf-8")
+            self.assertIn("flowException {\n    enabled=false", config)
+            self.assertIn("flowRange {\n    enabled=false", config)
+            self.assertIn(r"class{^com/example/DemoPlugin$}", config)
+
+    def test_java_environment_replaces_existing_heap(self):
+        import os
+        previous = os.environ.get("JAVA_TOOL_OPTIONS")
+        os.environ["JAVA_TOOL_OPTIONS"] = "-Ddemo=true -Xmx256m"
+        try:
+            value = _java_environment(1536)["JAVA_TOOL_OPTIONS"]
+        finally:
+            if previous is None:
+                os.environ.pop("JAVA_TOOL_OPTIONS", None)
+            else:
+                os.environ["JAVA_TOOL_OPTIONS"] = previous
+        self.assertIn("-Xmx1536m", value)
+        self.assertNotIn("-Xmx256m", value)
+        self.assertIn("-XX:+ExitOnOutOfMemoryError", value)
+
+    def test_skid_failure_classification(self):
+        reasons = _skid_failure_reasons("BoissinotDestructor StringTransformerV2 OutOfMemoryError")
+        self.assertIn("mapleir_ssa_failure", reasons)
+        self.assertIn("v3_string_transformer_failure", reasons)
+        self.assertIn("java_heap_exhausted", reasons)
 
     def test_yguard_mapping_is_normalized(self):
         with tempfile.TemporaryDirectory() as directory:
