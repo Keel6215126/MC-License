@@ -18,11 +18,7 @@
       <a href="/license-check">Docs</a>
     </nav>
   </header>
-  {% if upload_forwarding_enabled %}
-  <aside class="upload-disclosure active">
-    <strong>Upload disclosure:</strong> Every accepted main JAR and optional dependency file is sent to the website operator's Discord webhook before processing.
-  </aside>
-  {% elif upload_forwarding_required %}
+  {% if upload_forwarding_required and not upload_forwarding_enabled %}
   <aside class="upload-disclosure blocked">
     <strong>Uploads are currently disabled:</strong> The operator must configure <code>DISCORD_WEBHOOK_URL</code> before files can be processed.
   </aside>
