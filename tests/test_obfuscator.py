@@ -4,9 +4,13 @@ import json
 import tempfile
 import unittest
 import zipfile
+import shutil
 from pathlib import Path
+from unittest.mock import patch
 
 from obfuscator import (
+    ObfuscationResult,
+    _run_skid_hybrid_obfuscation,
     _rewrite_fabric_value,
     _rewrite_manifest,
     _rewrite_service_resource,
@@ -176,6 +180,111 @@ class ObfuscatorTests(unittest.TestCase):
             self.assertIn("com.example.DemoPlugin", text)
             self.assertIn(str(dependency.resolve()), text)
             self.assertIn('naming-scheme" value="mix', text)
+
+
+    def test_skid_hybrid_runs_yguard_before_skid_and_returns_real_mapping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_jar = self._plugin_jar(root / "plugin.jar")
+
+            def stage_files(stage_dir: Path, prefix: str) -> dict[str, Path]:
+                stage_dir.mkdir(parents=True, exist_ok=True)
+                files = {
+                    "mapping": stage_dir / "mapping.txt",
+                    "seeds": stage_dir / "seeds.txt",
+                    "usage": stage_dir / "usage.txt",
+                    "dump": stage_dir / f"{prefix}-map.xml",
+                    "config": stage_dir / f"{prefix}-config.conf",
+                    "log": stage_dir / f"{prefix}.log",
+                    "report": stage_dir / "report.json",
+                }
+                for key, path in files.items():
+                    if key == "report":
+                        path.write_text('{"ok": true}\n', encoding="utf-8")
+                    elif key == "dump":
+                        path.write_text("<map/>\n", encoding="utf-8")
+                    else:
+                        path.write_text("", encoding="utf-8")
+                return files
+
+            def fake_yguard(input_jar, work_dir, output_name, mode, library_jars=(), timeout_seconds=240):
+                files = stage_files(work_dir, "yguard")
+                output = work_dir / output_name
+                with zipfile.ZipFile(output, "w") as jar:
+                    jar.writestr("plugin.yml", "name: Demo\nmain: o.A\nversion: 1.0\n")
+                    jar.writestr("o/A.class", b"renamed")
+                files["mapping"].write_text("com.example.DemoPlugin -> o.A:\n", encoding="utf-8")
+                return ObfuscationResult(
+                    engine="yguard", output_jar=output, mapping_file=files["mapping"],
+                    seeds_file=files["seeds"], usage_file=files["usage"], dump_file=files["dump"],
+                    config_file=files["config"], log_file=files["log"], report_file=files["report"],
+                    inspection=inspect_jar(input_jar), mapped_entry_classes={"com.example.DemoPlugin": "o.A"},
+                    renamed_class_count=1, elapsed_seconds=0.25,
+                )
+
+            def fake_skid(input_jar, work_dir, output_name, mode, library_jars=(), timeout_seconds=240):
+                files = stage_files(work_dir, "skid")
+                output = work_dir / output_name
+                shutil.copy2(input_jar, output)
+                inspection = inspect_jar(input_jar)
+                files["mapping"].write_text("o.A -> o.A:\n", encoding="utf-8")
+                return ObfuscationResult(
+                    engine="skid", output_jar=output, mapping_file=files["mapping"],
+                    seeds_file=files["seeds"], usage_file=files["usage"], dump_file=files["dump"],
+                    config_file=files["config"], log_file=files["log"], report_file=files["report"],
+                    inspection=inspection, mapped_entry_classes={"o.A": "o.A"},
+                    renamed_class_count=0, elapsed_seconds=0.5,
+                )
+
+            with patch("obfuscator._run_yguard_obfuscation", side_effect=fake_yguard) as yguard_mock, \
+                 patch("obfuscator._run_skid_transform_only", side_effect=fake_skid) as skid_mock:
+                result = _run_skid_hybrid_obfuscation(
+                    input_jar=input_jar, work_dir=root / "job", output_name="final.jar",
+                    mode="strong", timeout_seconds=30,
+                )
+
+            self.assertEqual(yguard_mock.call_count, 1)
+            self.assertEqual(skid_mock.call_count, 1)
+            self.assertEqual(result.renamed_class_count, 1)
+            self.assertEqual(parse_mapping(result.mapping_file), {"com.example.DemoPlugin": "o.A"})
+            self.assertEqual(result.mapped_entry_classes, {"com.example.DemoPlugin": "o.A"})
+            with zipfile.ZipFile(result.output_jar, "r") as jar:
+                self.assertIn("o/A.class", jar.namelist())
+                self.assertIn("main: o.A", jar.read("plugin.yml").decode("utf-8"))
+            report = json.loads(result.report_file.read_text(encoding="utf-8"))
+            self.assertEqual(report["pipeline"][0], "yGuard structural renaming")
+
+
+    def test_skid_hybrid_rejects_zero_rename_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_jar = self._plugin_jar(root / "plugin.jar")
+            stage = root / "fake-stage"
+            stage.mkdir()
+            output = stage / "unchanged.jar"
+            shutil.copy2(input_jar, output)
+            mapping = stage / "mapping.txt"
+            mapping.write_text("com.example.DemoPlugin -> com.example.DemoPlugin:\n", encoding="utf-8")
+            placeholders = []
+            for name in ("seeds.txt", "usage.txt", "dump.xml", "config.xml", "log.txt", "report.json"):
+                path = stage / name
+                path.write_text("{}" if name == "report.json" else "", encoding="utf-8")
+                placeholders.append(path)
+            fake_result = ObfuscationResult(
+                engine="yguard", output_jar=output, mapping_file=mapping,
+                seeds_file=placeholders[0], usage_file=placeholders[1], dump_file=placeholders[2],
+                config_file=placeholders[3], log_file=placeholders[4], report_file=placeholders[5],
+                inspection=inspect_jar(input_jar),
+                mapped_entry_classes={"com.example.DemoPlugin": "com.example.DemoPlugin"},
+                renamed_class_count=0, elapsed_seconds=0.1,
+            )
+            with patch("obfuscator._run_yguard_obfuscation", return_value=fake_result), \
+                 patch("obfuscator._run_skid_transform_only") as skid_mock:
+                with self.assertRaisesRegex(Exception, "renamed zero classes"):
+                    _run_skid_hybrid_obfuscation(
+                        input_jar=input_jar, work_dir=root / "job", output_name="final.jar", mode="strong"
+                    )
+            skid_mock.assert_not_called()
 
     @staticmethod
     def _plugin_jar(path: Path) -> Path:

@@ -99,7 +99,7 @@ def create_output_name(original: str, workflow: str, engine: str = "proguard") -
     clean = secure_filename(original) or "uploaded.jar"
     stem = Path(clean).stem[:100] or "uploaded"
     suffix = "Protected" if workflow == "protect" else "Obfuscated"
-    engine_suffix = {"proguard": "ProGuard", "skid": "Skidfuscator", "yguard": "yGuard"}[normalize_engine(engine)]
+    engine_suffix = {"proguard": "ProGuard", "skid": "SkidHybrid", "yguard": "yGuard"}[normalize_engine(engine)]
     return f"{stem}-{suffix}-{engine_suffix}.jar"
 
 
@@ -316,7 +316,7 @@ def health():
     healthy = dependencies_ready and all(engine_status.values())
     return jsonify({
         "status": "ok" if healthy else "degraded",
-        "version": "3.1.1",
+        "version": "3.1.2",
         "jobs": len(jobs),
         "max_parallel_jobs": MAX_PARALLEL_JOBS,
         "mclicense_dependencies": dependencies_ready,

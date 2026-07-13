@@ -1,16 +1,16 @@
-# Minecraft Plugin Protector 3.1.1
+# Minecraft Plugin Protector 3.1.2
 
 A Railway-hostable website combining:
 
 - The fixed MC License 1.5.1 plugin implementer
 - ProGuard 7.9.1
-- Skidfuscator Community
+- Skid Hybrid (yGuard + Skidfuscator Community)
 - yGuard 5.0.0
 - A one-click **Protect** pipeline that licenses a plugin and then runs the selected obfuscator
 
 ## Pages
 
-- `/protect` — adds MC License, then runs ProGuard, Skidfuscator, or yGuard in strong mode
+- `/protect` — adds MC License, then runs ProGuard, Skid Hybrid, or yGuard in strong mode
 - `/license` — adds only MC License
 - `/obfuscate` — runs the selected obfuscation engine
 - `/license-check` — MC License integration documentation
@@ -21,14 +21,14 @@ A Railway-hostable website combining:
 
 The existing universal ProGuard integration remains available. It detects common Java and Minecraft entry metadata, supports safe and strong modes, rewrites renamed entry classes, and produces mapping/configuration diagnostics.
 
-### Skidfuscator Community
+### Skid Hybrid
 
-The Docker image downloads the current `skidfuscator.jar` release during the Railway build. The website runs it non-interactively with analytics disabled, phantom dependency handling enabled, and generated HOCON presets. Stable presets intentionally disable the V3 string transformer because it can fail inside MapleIR's SSA destructor on valid Java 21 plugin methods. Strong mode still uses condition, exception, range, and number transforms. A failed run is retried once with the compatibility flow preset.
+The public Skid option is a two-stage pipeline. yGuard 5.0.0 first performs structural package/class/member renaming and rewrites detected entry metadata. Skidfuscator Community then runs non-interactively with analytics disabled, phantom dependency handling enabled, and generated HOCON presets. Stable presets intentionally disable the V3 string transformer because it can fail inside MapleIR's SSA destructor on valid Java 21 plugin methods. A failed Skid stage is retried once with the compatibility flow preset.
 
-- **Strong:** condition, exception, range, and number transformations
-- **Safe:** preserves detected entry classes and disables exception-flow transformation
+- **Strong:** randomized yGuard renaming, then condition, exception, range, and number transformations
+- **Safe:** preserves detected entry classes during both stages and disables exception-flow transformation
 
-The community edition focuses on control-flow and number protection in the stable website presets. Structural class/member renaming is not included, so a renamed-class count of zero is expected.
+Community Skidfuscator itself does not rename symbols. The website now supplies that missing layer with yGuard before Skid runs, and rejects a Skid job if the renaming stage reports zero renamed classes.
 
 ### yGuard
 
@@ -105,7 +105,7 @@ python3 app.py
 - Temporary jobs are deleted after the configured TTL.
 - Set `APP_PASSWORD` before exposing a paid Railway deployment publicly.
 - Obfuscation cannot make JVM bytecode impossible to reverse engineer.
-- Skidfuscator and yGuard can be less compatible with reflection-heavy plugins than ProGuard. Use safe mode and provide dependency JARs when appropriate. Allocate at least 2 GB of Railway service memory when using Skidfuscator; its default Java heap is 1536 MB.
+- Skid Hybrid and standalone yGuard can be less compatible with reflection-heavy plugins than ProGuard. Use safe mode and provide dependency JARs when appropriate. Allocate at least 2 GB of Railway service memory when using Skidfuscator; its default Java heap is 1536 MB.
 
 ## Discord webhook upload forwarding
 

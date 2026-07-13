@@ -3,7 +3,7 @@
 {% block content %}
 <section class="hero home-hero">
   <div>
-    <div class="eyebrow">MC License + ProGuard + Skidfuscator + yGuard</div>
+    <div class="eyebrow">MC License + ProGuard + Skid Hybrid + yGuard</div>
     <h1>License it. Choose an engine. Ship one protected JAR.</h1>
     <p>One Railway website contains the fixed MC License implementer and three selectable Java obfuscation engines, plus a one-click workflow that runs licensing and obfuscation in the correct order.</p>
   </div>
@@ -12,7 +12,7 @@
 <section class="tool-grid">
   <a class="tool-card primary" href="/protect">
     <span class="tool-number">01</span><h2>Protect</h2>
-    <p>Add the mandatory MC License gate, include all required runtime classes, then use ProGuard, Skidfuscator, or yGuard.</p>
+    <p>Add the mandatory MC License gate, include all required runtime classes, then use ProGuard, Skid Hybrid, or yGuard.</p>
     <strong>Recommended workflow →</strong>
   </a>
   <a class="tool-card" href="/license">
@@ -22,7 +22,7 @@
   </a>
   <a class="tool-card" href="/obfuscate">
     <span class="tool-number">03</span><h2>Obfuscate only</h2>
-    <p>Choose among reliable renaming, aggressive flow protection, or randomized yGuard naming without adding licensing.</p>
+    <p>Choose ProGuard, the two-stage Skid Hybrid pipeline, or standalone yGuard without adding licensing.</p>
     <strong>Open multi-engine obfuscator →</strong>
   </a>
 </section>
@@ -30,7 +30,7 @@
   <h2>Included obfuscation engines</h2>
   <ul>
     <li><strong>ProGuard 7.9.1:</strong> dependable class/member renaming, package repackaging, and metadata rewriting.</li>
-    <li><strong>Skidfuscator Community:</strong> control-flow and number transformations. Its free edition may report zero renamed classes.</li>
+    <li><strong>Skid Hybrid:</strong> yGuard first scrambles packages/classes/members, then Skidfuscator Community applies flow and number transformations.</li>
     <li><strong>yGuard 5.0.0:</strong> randomized package/class/member renaming with a normalized mapping file in the build bundle.</li>
     <li>Every accepted upload, including optional dependency files, is forwarded to the configured Discord webhook before processing.</li>
   </ul>

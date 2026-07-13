@@ -701,7 +701,7 @@ def normalize_engine(engine: str) -> str:
 def engine_display_name(engine: str) -> str:
     return {
         "proguard": "ProGuard",
-        "skid": "Skidfuscator Community",
+        "skid": "Skid Hybrid (yGuard + Skidfuscator)",
         "yguard": "yGuard",
     }[normalize_engine(engine)]
 
@@ -846,7 +846,11 @@ def get_engine_status() -> dict[str, bool]:
     except ObfuscationError:
         status["proguard"] = False
     try:
+        # The public Skid option is a two-stage pipeline: yGuard supplies
+        # structural renaming and Community Skidfuscator hardens method bodies.
         _resolve_skid_command()
+        _resolve_ant_command()
+        _resolve_yguard_lib_dir()
         status["skid"] = True
     except ObfuscationError:
         status["skid"] = False
@@ -944,7 +948,7 @@ def _write_identity_mapping(path: Path, classes: Iterable[str]) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def _run_skid_obfuscation(
+def _run_skid_transform_only(
     input_jar: Path,
     work_dir: Path,
     output_name: str,
@@ -1077,7 +1081,7 @@ def _run_skid_obfuscation(
         "attempts": attempts,
         "compatibility_retry_used": len(attempts) > 1,
         "v3_string_encryption_enabled": any(attempt["profile"] == "experimental" for attempt in attempts),
-        "community_edition_note": "Community Skidfuscator applies flow and constant transformations; structural renaming is not included.",
+        "community_edition_note": "This stage applies flow and constant transformations only; the public Skid pipeline gets structural renaming from yGuard first.",
     }
     report_file = work_dir / "report.json"
     report_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -1262,6 +1266,160 @@ def _run_yguard_obfuscation(
     )
 
 
+
+def _read_json_file(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _run_skid_hybrid_obfuscation(
+    input_jar: Path,
+    work_dir: Path,
+    output_name: str,
+    mode: str,
+    library_jars: Iterable[Path] = (),
+    timeout_seconds: int = 240,
+) -> ObfuscationResult:
+    """Run visible structural renaming, then Community Skid transformations.
+
+    Community Skidfuscator deliberately starts its session with ``renamer(false)``
+    and its class/method/field renamers are not available in the free edition.
+    Running it directly therefore leaves a decompiler's package tree readable.
+    yGuard is used as the deterministic structural stage, after which Skid applies
+    its flow and constant transformations to the already-renamed bytecode.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    libraries = [Path(value) for value in library_jars]
+    original_inspection = inspect_jar(input_jar)
+    yguard_dir = work_dir / "yguard-stage"
+    skid_dir = work_dir / "skid-stage"
+    yguard_dir.mkdir(parents=True, exist_ok=True)
+    skid_dir.mkdir(parents=True, exist_ok=True)
+
+    yguard_result = _run_yguard_obfuscation(
+        input_jar=input_jar,
+        work_dir=yguard_dir,
+        output_name="renamed-stage.jar",
+        mode=mode,
+        library_jars=libraries,
+        timeout_seconds=timeout_seconds,
+    )
+    if yguard_result.renamed_class_count <= 0:
+        raise ObfuscationError(
+            "The Skid pipeline stopped because its yGuard stage renamed zero classes. "
+            "This would produce another apparently unchanged JAR. Check the yGuard log and keep rules."
+        )
+
+    skid_result = _run_skid_transform_only(
+        input_jar=yguard_result.output_jar,
+        work_dir=skid_dir,
+        output_name=output_name,
+        mode=mode,
+        library_jars=libraries,
+        timeout_seconds=timeout_seconds,
+    )
+
+    output_jar = work_dir / output_name
+    shutil.copy2(skid_result.output_jar, output_jar)
+
+    mapping_file = work_dir / "mapping.txt"
+    shutil.copy2(yguard_result.mapping_file, mapping_file)
+    mapping = parse_mapping(mapping_file)
+    # Re-apply metadata against the original names as a final guard. Normally
+    # yGuard's stage already rewrites it, but this also covers ServiceLoader and
+    # framework resources that yGuard itself does not understand.
+    rewrite_output_metadata(output_jar, mapping, original_inspection)
+    validation = validate_output(output_jar, original_inspection, mapping)
+    renamed_class_count = sum(1 for old, new in mapping.items() if old != new)
+    if renamed_class_count <= 0:
+        raise ObfuscationError("Skid hybrid validation found no structural renaming in the final JAR.")
+    with zipfile.ZipFile(output_jar, "r") as final_jar:
+        final_names = set(final_jar.namelist())
+    mapped_paths_present = sum(
+        1
+        for old, new in mapping.items()
+        if old != new and new.replace(".", "/") + ".class" in final_names
+    )
+    if mapped_paths_present <= 0:
+        raise ObfuscationError(
+            "Skid hybrid validation found a mapping file, but none of its renamed class paths exist in the final JAR."
+        )
+
+    yguard_config = work_dir / "yguard-build.xml"
+    skid_config = work_dir / skid_result.config_file.name
+    yguard_native_map = work_dir / "yguard-map.xml"
+    if yguard_result.config_file.is_file():
+        shutil.copy2(yguard_result.config_file, yguard_config)
+    if skid_result.config_file.is_file():
+        shutil.copy2(skid_result.config_file, skid_config)
+    if yguard_result.dump_file.is_file():
+        shutil.copy2(yguard_result.dump_file, yguard_native_map)
+
+    log_file = work_dir / "skid-hybrid.log"
+    with log_file.open("w", encoding="utf-8") as handle:
+        handle.write("===== Stage 1: yGuard structural renaming =====\n")
+        if yguard_result.log_file.is_file():
+            handle.write(yguard_result.log_file.read_text(encoding="utf-8", errors="replace"))
+        handle.write("\n\n===== Stage 2: Skidfuscator Community transforms =====\n")
+        if skid_result.log_file.is_file():
+            handle.write(skid_result.log_file.read_text(encoding="utf-8", errors="replace"))
+
+    pipeline_config = work_dir / "pipeline-config.txt"
+    pipeline_config.write_text(
+        "Skid Hybrid pipeline\n"
+        "1. yGuard structural renaming: yguard-build.xml\n"
+        f"2. Skidfuscator Community transforms: {skid_config.name}\n",
+        encoding="utf-8",
+    )
+    for empty_name in ("seeds.txt", "usage.txt"):
+        (work_dir / empty_name).write_text("", encoding="utf-8")
+
+    yguard_report = _read_json_file(yguard_result.report_file)
+    skid_report = _read_json_file(skid_result.report_file)
+    elapsed = yguard_result.elapsed_seconds + skid_result.elapsed_seconds
+    report = {
+        "engine": "skid",
+        "engine_name": engine_display_name("skid"),
+        "pipeline": ["yGuard structural renaming", "Skidfuscator Community flow/constant transforms"],
+        "mode": mode,
+        "frameworks": original_inspection.frameworks,
+        "entry_classes_before": original_inspection.entry_classes,
+        "entry_classes_after": validation["mapped_entry_classes"],
+        "input_class_count": original_inspection.class_count,
+        "output_class_count": validation["output_class_count"],
+        "renamed_class_count": renamed_class_count,
+        "verified_renamed_class_paths": mapped_paths_present,
+        "removed_signature_entries": original_inspection.signed_entries_removed,
+        "elapsed_seconds": round(elapsed, 3),
+        "yguard_stage": yguard_report,
+        "skid_stage": skid_report,
+        "structural_renaming_source": "yGuard 5.0.0",
+        "community_skid_note": "Community Skidfuscator does not rename symbols; yGuard supplies that stage before Skid runs.",
+    }
+    report_file = work_dir / "report.json"
+    report_file.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    return ObfuscationResult(
+        engine="skid",
+        output_jar=output_jar,
+        mapping_file=mapping_file,
+        seeds_file=work_dir / "seeds.txt",
+        usage_file=work_dir / "usage.txt",
+        dump_file=yguard_native_map,
+        config_file=pipeline_config,
+        log_file=log_file,
+        report_file=report_file,
+        inspection=original_inspection,
+        mapped_entry_classes=validation["mapped_entry_classes"],
+        renamed_class_count=renamed_class_count,
+        elapsed_seconds=elapsed,
+    )
+
 def run_obfuscation(
     input_jar: Path,
     work_dir: Path,
@@ -1275,7 +1433,7 @@ def run_obfuscation(
     if selected == "proguard":
         return _run_proguard_obfuscation(input_jar, work_dir, output_name, mode, library_jars, timeout_seconds)
     if selected == "skid":
-        return _run_skid_obfuscation(input_jar, work_dir, output_name, mode, library_jars, timeout_seconds)
+        return _run_skid_hybrid_obfuscation(input_jar, work_dir, output_name, mode, library_jars, timeout_seconds)
     return _run_yguard_obfuscation(input_jar, work_dir, output_name, mode, library_jars, timeout_seconds)
 
 def build_bundle(result: ObfuscationResult, bundle_path: Path) -> Path:
@@ -1289,8 +1447,19 @@ def build_bundle(result: ObfuscationResult, bundle_path: Path) -> Path:
         result.log_file,
         result.report_file,
     ]
+    # Hybrid engines can have more than one native configuration/log. Include
+    # those root-level artifacts without leaking temporary stage JARs.
+    for pattern in ("*.conf", "*.xml", "*.log", "pipeline-config.txt"):
+        files.extend(result.output_jar.parent.glob(pattern))
+    unique_files: list[Path] = []
+    seen: set[Path] = set()
+    for path in files:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique_files.append(path)
     with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
-        for path in files:
+        for path in unique_files:
             if path.is_file():
                 bundle.write(path, arcname=path.name)
     return bundle_path
