@@ -23,3 +23,4 @@
   font-size: .82rem;
 }
 button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+.compact-callout{margin:0}.compact-callout strong{font-size:.88rem}

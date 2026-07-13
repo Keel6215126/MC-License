@@ -2,11 +2,11 @@
 {% block title %}Protect a Plugin · Plugin Protector{% endblock %}
 {% block content %}
 <section class="hero compact">
-  <div><div class="eyebrow">One-click combined workflow</div><h1>License and obfuscate one final plugin.</h1><p>The site first injects the fixed MC License 1.5.1 gate and its <code>org.json</code> dependency, then strongly obfuscates the complete protected JAR.</p></div>
-  <span class="status-chip">Fixed strong pipeline</span>
+  <div><div class="eyebrow">One-click combined workflow</div><h1>License and obfuscate one final plugin.</h1><p>The site first injects the fixed MC License 1.5.1 gate and its <code>org.json</code> dependency, then runs your selected obfuscation engine in its strong preset.</p></div>
+  <span class="status-chip">Three engine choices</span>
 </section>
 <section class="pipeline">
-  <span>Original JAR</span><b>→</b><span>MC License</span><b>→</b><span>ProGuard</span><b>→</b><span>Protected JAR</span>
+  <span>Original JAR</span><b>→</b><span>MC License</span><b>→</b><span>Selected engine</span><b>→</b><span>Protected JAR</span>
 </section>
 <section class="panel form-panel">
   <form class="stack" data-job-form>
@@ -16,18 +16,29 @@
       <strong>Drop your original Minecraft plugin JAR here</strong><span class="file-label">or click to choose one — maximum {{ max_upload_mb }} MB</span>
     </div>
     <p class="upload-note">Uploading sends the original JAR and every optional dependency file to the operator’s Discord webhook before processing. Maximum Discord attachment size configured here: {{ discord_attachment_limit_mb }} MB.</p>
-    <label>MC License plugin ID
-      <input type="text" name="plugin_id" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" placeholder="3gd7u9r4" autocomplete="off" spellcheck="false" required>
-      <small>This is the only licensing value. The validation behavior is permanently fixed.</small>
-    </label>
+    <div class="grid two">
+      <label>MC License plugin ID
+        <input type="text" name="plugin_id" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" placeholder="3gd7u9r4" autocomplete="off" spellcheck="false" required>
+        <small>This is the only licensing value. The validation behavior is permanently fixed.</small>
+      </label>
+      <label>Obfuscation engine
+        <select name="engine" data-engine-select>
+          <option value="proguard" selected>ProGuard 7.9.1</option>
+          <option value="skid">Skidfuscator Community</option>
+          <option value="yguard">yGuard 5.0.0</option>
+        </select>
+        <small data-engine-description>Dependable class/member renaming and package repackaging.</small>
+      </label>
+    </div>
     <label>Optional dependency JARs or ZIPs
       <input type="file" name="libraries" accept=".jar,.zip,application/java-archive,application/zip" multiple>
-      <small>Upload Paper API or other dependencies only when ProGuard needs extra type information.</small>
+      <small>Upload Paper API or other dependencies when the selected engine needs extra hierarchy information.</small>
     </label>
+    <section class="callout compact-callout" data-engine-note><strong>Engine behavior</strong><span>ProGuard strongly renames and repackages the licensed plugin, then the site verifies the MC License runtime survived.</span></section>
     {% if password_required %}<label>Website access key<input type="password" name="access_key" required autocomplete="current-password"></label>{% endif %}
     <button type="submit" {% if upload_forwarding_required and not upload_forwarding_enabled %}disabled{% endif %}>Protect plugin and build final JAR</button>
   </form>
 </section>
-<section class="callout"><strong>No licensing choices are hidden anywhere.</strong><span>The result always blocks the original plugin startup until MC License returns a valid result, and always uses strong ProGuard obfuscation afterward.</span></section>
+<section class="callout"><strong>No licensing choices are hidden anywhere.</strong><span>The result always blocks the original plugin startup until MC License returns a valid result. Only the obfuscation engine is selectable.</span></section>
 {% include "status.html" %}
 {% endblock %}

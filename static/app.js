@@ -20,6 +20,38 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+
+  document.querySelectorAll("[data-engine-select]").forEach((select) => {
+    const form = select.closest("form");
+    const description = form?.querySelector("[data-engine-description]");
+    const note = form?.querySelector("[data-engine-note] span");
+    const workflow = form?.querySelector('input[name="workflow"]')?.value || "obfuscate";
+    const copy = {
+      proguard: {
+        description: "Dependable class/member renaming and package repackaging.",
+        obfuscate: "ProGuard renames classes and members, rewrites supported metadata, and keeps the code itself unchanged.",
+        protect: "ProGuard strongly renames and repackages the licensed plugin, then the site verifies the MC License runtime survived."
+      },
+      skid: {
+        description: "Community flow, number, and string transformations; structural renaming is not included.",
+        obfuscate: "Skidfuscator Community applies control-flow and constant/string transformations. A renamed-class count of zero is expected.",
+        protect: "Skidfuscator Community hardens the licensed plugin's method bodies without renaming its classes, then the license runtime is verified."
+      },
+      yguard: {
+        description: "Randomized package, class, field, and private-method renaming through yGuard.",
+        obfuscate: "yGuard applies randomized compatible names, preserves public/protected API method names, and rewrites detected entry metadata.",
+        protect: "yGuard randomly renames the licensed plugin while preserving public/protected API methods, then the license runtime is verified."
+      }
+    };
+    const update = () => {
+      const current = copy[select.value] || copy.proguard;
+      if (description) description.textContent = current.description;
+      if (note) note.textContent = current[workflow] || current.obfuscate;
+    };
+    select.addEventListener("change", update);
+    update();
+  });
+
   document.querySelectorAll("[data-tabs]").forEach((tabs) => {
     const buttons = [...tabs.querySelectorAll("[data-tab]")];
     const panels = [...tabs.querySelectorAll("[data-panel]")];
@@ -48,7 +80,7 @@ function setupJobForm(form) {
     pill: panel.querySelector("[data-status-pill]"), title: panel.querySelector("[data-status-title]"),
     message: panel.querySelector("[data-status-message]"), spinner: panel.querySelector("[data-spinner]"),
     error: panel.querySelector("[data-error-box]"), result: panel.querySelector("[data-result-grid]"),
-    downloads: panel.querySelector("[data-downloads]"), frameworks: panel.querySelector("[data-frameworks]"),
+    downloads: panel.querySelector("[data-downloads]"), engine: panel.querySelector("[data-engine]"), frameworks: panel.querySelector("[data-frameworks]"),
     renamed: panel.querySelector("[data-renamed-count]"), elapsed: panel.querySelector("[data-elapsed]"),
     entries: panel.querySelector("[data-entry-classes]"), jar: panel.querySelector("[data-jar-download]"),
     bundle: panel.querySelector("[data-bundle-download]")
@@ -68,7 +100,7 @@ function setupJobForm(form) {
     if (job.status === "running") fields.title.textContent = job.workflow === "protect" ? "Protecting your plugin" : "Obfuscating your JAR";
     if (job.status === "complete") {
       fields.spinner.classList.add("hidden"); fields.pill.classList.add("success"); fields.title.textContent = "Build complete";
-      fields.frameworks.textContent = (job.frameworks || []).join(", ") || "Generic Java JAR";
+      fields.engine.textContent = job.engine_name || job.engine || "Unknown"; fields.frameworks.textContent = (job.frameworks || []).join(", ") || "Generic Java JAR";
       fields.renamed.textContent = Number(job.renamed_class_count || 0).toLocaleString(); fields.elapsed.textContent = `${job.elapsed_seconds || 0} seconds`;
       fields.entries.textContent = Object.entries(job.entry_classes || {}).map(([a,b]) => `${a} → ${b}`).join(" | ") || "None detected";
       fields.result.classList.remove("hidden"); fields.jar.href = job.jar_download; fields.bundle.href = job.bundle_download; fields.downloads.classList.remove("hidden");

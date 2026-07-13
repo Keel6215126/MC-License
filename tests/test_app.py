@@ -59,6 +59,26 @@ class AppTests(unittest.TestCase):
         kinds = [call.args[3] for call in forward.call_args_list]
         self.assertEqual(kinds, ["main JAR", "dependency"])
 
+    def test_invalid_engine_is_rejected(self):
+        response = self.client.post("/api/jobs", data={"workflow": "obfuscate", "engine": "not-real"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_yguard_engine_is_saved_on_job(self):
+        main_jar = io.BytesIO()
+        with zipfile.ZipFile(main_jar, "w") as archive:
+            archive.writestr("Example.class", b"class")
+        main_jar.seek(0)
+        with patch("app.require_webhook"), patch("app.forward_upload"), patch.object(webapp.executor, "submit"):
+            response = self.client.post(
+                "/api/jobs",
+                data={"workflow": "obfuscate", "engine": "yguard", "mode": "strong", "jar": (main_jar, "Example.jar")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 202)
+        payload = response.get_json()
+        self.assertEqual(payload["engine"], "yguard")
+        self.assertEqual(payload["engine_name"], "yGuard")
+
 
 if __name__ == "__main__":
     unittest.main()

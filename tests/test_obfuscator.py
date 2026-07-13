@@ -9,10 +9,15 @@ from pathlib import Path
 from obfuscator import (
     _rewrite_fabric_value,
     _rewrite_manifest,
+    _rewrite_service_resource,
     _rewrite_yaml,
+    generate_skid_config,
+    generate_yguard_build,
     inspect_jar,
     normalize_class_reference,
+    normalize_engine,
     parse_mapping,
+    parse_yguard_mapping,
 )
 
 
@@ -65,6 +70,80 @@ class ObfuscatorTests(unittest.TestCase):
             path = Path(directory) / "mapping.txt"
             path.write_text("com.example.Main -> o.a:\n    int field -> a\n", encoding="utf-8")
             self.assertEqual(parse_mapping(path), {"com.example.Main": "o.a"})
+
+    def test_engine_aliases(self):
+        self.assertEqual(normalize_engine("skidfuscator"), "skid")
+        self.assertEqual(normalize_engine("y-guard"), "yguard")
+        with self.assertRaises(Exception):
+            normalize_engine("unknown")
+
+    def test_skid_safe_config_exempts_entry_class(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inspection = inspect_jar(self._plugin_jar(Path(directory) / "plugin.jar"))
+            config = generate_skid_config(Path(directory), inspection, "safe").read_text(encoding="utf-8")
+            self.assertIn(r"class{^com/example/DemoPlugin$}", config)
+            self.assertIn("flowException", config)
+            self.assertIn("enabled=false", config)
+
+    def test_yguard_mapping_is_normalized(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "yguard.xml"
+            path.write_text(
+                '<yguard><map>'
+                '<package name="com" map="A"/>'
+                '<package name="com.example" map="B"/>'
+                '<class name="com.example.Main" map="C"/>'
+                '<class name="com.example.Main$Inner" map="D"/>'
+                '</map></yguard>',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                parse_yguard_mapping(path),
+                {"com.example.Main": "A.B.C", "com.example.Main$Inner": "A.B.C$D"},
+            )
+
+    def test_service_loader_metadata_rewrite(self):
+        name, data = _rewrite_service_resource(
+            "META-INF/services/com.example.Service",
+            b"com.example.Provider\n# keep\n",
+            {"com.example.Service": "o.A", "com.example.Provider": "o.B"},
+        )
+        self.assertEqual(name, "META-INF/services/o.A")
+        self.assertIn(b"o.B", data)
+        self.assertIn(b"# keep", data)
+
+    def test_yguard_build_contains_dependencies_and_keep_rules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jar_path = self._plugin_jar(root / "plugin.jar")
+            dependency = root / "dependency.jar"
+            with zipfile.ZipFile(dependency, "w") as jar:
+                jar.writestr("Dependency.class", b"x")
+            fake_lib = root / "yguard-lib"
+            fake_lib.mkdir()
+            (fake_lib / "yguard-5.0.0.jar").write_bytes(b"jar")
+            import os
+            old = os.environ.get("YGUARD_LIB_DIR")
+            os.environ["YGUARD_LIB_DIR"] = str(fake_lib)
+            try:
+                inspection = inspect_jar(jar_path)
+                build = generate_yguard_build(jar_path, root / "out.jar", root, inspection, "strong", [dependency])
+            finally:
+                if old is None:
+                    os.environ.pop("YGUARD_LIB_DIR", None)
+                else:
+                    os.environ["YGUARD_LIB_DIR"] = old
+            text = build.read_text(encoding="utf-8")
+            self.assertIn("com.example.DemoPlugin", text)
+            self.assertIn(str(dependency.resolve()), text)
+            self.assertIn('naming-scheme" value="mix', text)
+
+    @staticmethod
+    def _plugin_jar(path: Path) -> Path:
+        with zipfile.ZipFile(path, "w") as jar:
+            jar.writestr("plugin.yml", "name: Demo\nmain: com.example.DemoPlugin\nversion: 1.0\n")
+            jar.writestr("com/example/DemoPlugin.class", b"x")
+        return path
 
 
 if __name__ == "__main__":

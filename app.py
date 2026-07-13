@@ -26,6 +26,9 @@ from license_injector import (
 from obfuscator import (
     ObfuscationError,
     build_bundle,
+    engine_display_name,
+    get_engine_status,
+    normalize_engine,
     run_obfuscation,
     safe_extract_library_zip,
 )
@@ -84,7 +87,7 @@ def update_job(job_id: str, **changes: Any) -> None:
 
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
     allowed = {
-        "id", "workflow", "status", "filename", "mode", "message", "error",
+        "id", "workflow", "status", "filename", "mode", "engine", "engine_name", "message", "error",
         "created_at", "started_at", "finished_at", "frameworks", "entry_classes",
         "renamed_class_count", "elapsed_seconds", "jar_download", "bundle_download",
         "license_original_main", "license_wrapper_main", "license_library_classes",
@@ -92,11 +95,12 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in job.items() if key in allowed and value is not None}
 
 
-def create_output_name(original: str, workflow: str) -> str:
+def create_output_name(original: str, workflow: str, engine: str = "proguard") -> str:
     clean = secure_filename(original) or "uploaded.jar"
     stem = Path(clean).stem[:100] or "uploaded"
     suffix = "Protected" if workflow == "protect" else "Obfuscated"
-    return f"{stem}-{suffix}.jar"
+    engine_suffix = {"proguard": "ProGuard", "skid": "Skidfuscator", "yguard": "yGuard"}[normalize_engine(engine)]
+    return f"{stem}-{suffix}-{engine_suffix}.jar"
 
 
 def save_upload(file_storage: Any, destination: Path) -> None:
@@ -163,6 +167,8 @@ def process_job(job_id: str) -> None:
     output_name = job["output_name"]
     workflow = job["workflow"]
     mode = job["mode"]
+    engine = job.get("engine", "proguard")
+    engine_name = engine_display_name(engine)
     libraries = [Path(value) for value in job.get("libraries", [])]
 
     update_job(job_id, status="running", message="Preparing the JAR…", started_at=now())
@@ -179,9 +185,9 @@ def process_job(job_id: str) -> None:
                 dependency_dir=MCL_DEPENDENCY_DIR,
                 timeout_seconds=LICENSE_TIMEOUT_SECONDS,
             )
-            update_job(job_id, message="MC License added. ProGuard is obfuscating the protected JAR…")
+            update_job(job_id, message=f"MC License added. {engine_name} is obfuscating the protected JAR…")
         else:
-            update_job(job_id, message="ProGuard is processing the JAR…")
+            update_job(job_id, message=f"{engine_name} is processing the JAR…")
 
         result = run_obfuscation(
             input_jar=source_jar,
@@ -190,6 +196,7 @@ def process_job(job_id: str) -> None:
             mode=mode,
             library_jars=libraries,
             timeout_seconds=TIMEOUT_SECONDS,
+            engine=engine,
         )
         if workflow == "protect":
             validate_protected_jar(result.output_jar, result.mapping_file)
@@ -198,6 +205,8 @@ def process_job(job_id: str) -> None:
         token = job["token"]
         changes: dict[str, Any] = {
             "status": "complete",
+            "engine": engine,
+            "engine_name": engine_name,
             "message": "Protection completed and the final JAR passed validation." if workflow == "protect" else "Obfuscation completed and the output passed validation.",
             "finished_at": now(),
             "frameworks": result.inspection.frameworks,
@@ -303,16 +312,18 @@ def license_check_page():
 def health():
     dependencies_ready = MCL_DEPENDENCY_DIR.is_dir()
     webhook_ready = DISCORD_WEBHOOK.configured or not DISCORD_WEBHOOK_REQUIRED
-    healthy = dependencies_ready
+    engine_status = get_engine_status()
+    healthy = dependencies_ready and all(engine_status.values())
     return jsonify({
         "status": "ok" if healthy else "degraded",
-        "version": "3.0.1",
+        "version": "3.1.0",
         "jobs": len(jobs),
         "max_parallel_jobs": MAX_PARALLEL_JOBS,
         "mclicense_dependencies": dependencies_ready,
         "discord_webhook_configured": DISCORD_WEBHOOK.configured,
         "discord_webhook_required": DISCORD_WEBHOOK_REQUIRED,
         "uploads_enabled": webhook_ready,
+        "obfuscation_engines": engine_status,
     }), 200 if healthy else 503
 
 
@@ -366,6 +377,11 @@ def create_job():
     if workflow not in {"obfuscate", "protect"}:
         return jsonify({"error": "Invalid workflow."}), 400
 
+    try:
+        engine = normalize_engine(request.form.get("engine", "proguard"))
+    except ObfuscationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     uploaded = request.files.get("jar")
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "Choose a JAR file first."}), 400
@@ -415,7 +431,7 @@ def create_job():
         status = 502 if isinstance(exc, WebhookDeliveryError) else 400
         return jsonify({"error": message}), status
 
-    output_name = create_output_name(uploaded.filename, workflow)
+    output_name = create_output_name(uploaded.filename, workflow, engine)
     job = {
         "id": job_id,
         "token": token,
@@ -425,6 +441,8 @@ def create_job():
         "message": "Waiting for a build worker…",
         "filename": uploaded.filename,
         "mode": mode,
+        "engine": engine,
+        "engine_name": engine_display_name(engine),
         "created_at": now(),
         "started_at": None,
         "finished_at": None,

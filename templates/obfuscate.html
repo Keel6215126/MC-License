@@ -2,8 +2,8 @@
 {% block title %}Obfuscate a JAR · Plugin Protector{% endblock %}
 {% block content %}
 <section class="hero compact">
-  <div><div class="eyebrow">Universal ProGuard</div><h1>Obfuscate any Java JAR.</h1><p>Automatic metadata detection supports Bukkit, Paper, Bungee, Velocity, Fabric, Forge, NeoForge, executable JARs, services, and more.</p></div>
-  <span class="status-chip">ProGuard 7.9.1</span>
+  <div><div class="eyebrow">Three obfuscation engines</div><h1>Obfuscate any Java JAR.</h1><p>Choose ProGuard, Skidfuscator Community, or yGuard. Automatic metadata detection supports Bukkit, Paper, Bungee, Velocity, Fabric, Forge, NeoForge, executable JARs, services, and more.</p></div>
+  <span class="status-chip">ProGuard · Skid · yGuard</span>
 </section>
 <section class="panel form-panel">
   <form class="stack" data-job-form>
@@ -14,14 +14,23 @@
     </div>
     <p class="upload-note">Uploading sends the original JAR and every optional dependency file to the operator’s Discord webhook before processing. Maximum Discord attachment size configured here: {{ discord_attachment_limit_mb }} MB per file.</p>
     <div class="grid two">
-      <label>Obfuscation mode
-        <select name="mode"><option value="strong" selected>Strong — rename and repackage</option><option value="safe">Safe — preserve detected entry classes</option></select>
+      <label>Obfuscation engine
+        <select name="engine" data-engine-select>
+          <option value="proguard" selected>ProGuard 7.9.1 — dependable renaming and repackaging</option>
+          <option value="skid">Skidfuscator Community — flow and string/number protection</option>
+          <option value="yguard">yGuard 5.0.0 — randomized name obfuscation</option>
+        </select>
+        <small data-engine-description>Best general-purpose option for plugins and ordinary Java JARs.</small>
       </label>
-      <label>Optional dependency JARs or ZIPs
-        <input type="file" name="libraries" accept=".jar,.zip,application/java-archive,application/zip" multiple>
-        <small>Dependencies improve hierarchy analysis and are not copied into the output.</small>
+      <label>Obfuscation mode
+        <select name="mode"><option value="strong" selected>Strong — maximum compatible preset</option><option value="safe">Safe — preserve detected entry classes</option></select>
       </label>
     </div>
+    <label>Optional dependency JARs or ZIPs
+      <input type="file" name="libraries" accept=".jar,.zip,application/java-archive,application/zip" multiple>
+      <small>Dependencies improve hierarchy analysis and are not copied into the output.</small>
+    </label>
+    <section class="callout compact-callout" data-engine-note><strong>Engine behavior</strong><span>ProGuard renames classes and members, rewrites supported metadata, and keeps the code itself unchanged.</span></section>
     {% if password_required %}<label>Website access key<input type="password" name="access_key" required autocomplete="current-password"></label>{% endif %}
     <button type="submit" {% if upload_forwarding_required and not upload_forwarding_enabled %}disabled{% endif %}>Obfuscate JAR</button>
   </form>

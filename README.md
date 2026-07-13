@@ -1,53 +1,64 @@
-# Minecraft Plugin Protector 3.0.1 3.0.0
+# Minecraft Plugin Protector 3.1.0
 
-A single Railway-hostable website combining:
+A Railway-hostable website combining:
 
 - The fixed MC License 1.5.1 plugin implementer
-- The Universal ProGuard 7.9.1 web obfuscator
-- A one-click **Protect** pipeline that runs both in the correct order
+- ProGuard 7.9.1
+- Skidfuscator Community
+- yGuard 5.0.0
+- A one-click **Protect** pipeline that licenses a plugin and then runs the selected obfuscator
 
 ## Pages
 
-- `/protect` — adds MC License, then strongly obfuscates the completed plugin
+- `/protect` — adds MC License, then runs ProGuard, Skidfuscator, or yGuard in strong mode
 - `/license` — adds only MC License
-- `/obfuscate` — runs only ProGuard
+- `/obfuscate` — runs the selected obfuscation engine
 - `/license-check` — MC License integration documentation
+
+## Obfuscation engines
+
+### ProGuard
+
+The existing universal ProGuard integration remains available. It detects common Java and Minecraft entry metadata, supports safe and strong modes, rewrites renamed entry classes, and produces mapping/configuration diagnostics.
+
+### Skidfuscator Community
+
+The Docker image downloads the current `skidfuscator.jar` release during the Railway build. The website runs it non-interactively with analytics disabled, phantom dependency handling enabled, and generated HOCON presets.
+
+- **Strong:** condition, exception, range, number, and string transformations
+- **Safe:** preserves detected entry classes and disables exception-flow transformation
+
+The community edition focuses on control-flow and constant/string protection. Structural class/member renaming is not included, so a renamed-class count of zero is expected.
+
+### yGuard
+
+The Docker image installs yGuard 5.0.0 and its runtime dependencies from Maven Central, then runs it through Apache Ant.
+
+- Randomized mappings in strong mode
+- Compatible naming scheme suitable for normal JAR filesystems and decompilers
+- Public and protected API method names are retained for framework compatibility
+- Detected entry metadata is rewritten after renaming
+- Native yGuard XML mapping plus normalized ProGuard-style mapping are included in the bundle
 
 ## Fixed licensing behavior
 
-The website never offers licensing modes. Every licensed output performs this check before the original plugin starts:
-
-```java
-if (!MCLicense.validateKey(this, "yourPluginId")) {
-    Bukkit.getPluginManager().disablePlugin(this);
-    return;
-}
-```
-
-A missing, invalid, expired, rejected, or failed validation always disables the plugin. The only runtime file created by MC License is the empty `mclicense.txt` file where the user places their key.
-
-The injector shades both the MC License library and its required `org.json` runtime classes. This fixes the `NoClassDefFoundError: org/json/JSONObject` failure seen when only the MC License package was copied.
+Every licensed output performs the MC License check before the original plugin starts. Missing, invalid, expired, rejected, or failed validation disables the plugin. The only licensing value accepted by the website is the 8-character plugin ID.
 
 ## Combined Protect pipeline
 
-1. Validates the upload and the 8-character plugin ID.
-2. Injects the official MC License 1.5.1 library.
-3. Injects `org.json`, including `JSONObject.class`.
-4. Generates a mandatory wrapper entry point.
-5. Runs ProGuard in fixed **strong** mode.
-6. Rewrites supported plugin metadata after class renaming.
-7. Confirms the final JAR still contains the license marker and mapped licensing runtime classes.
-8. Returns the final JAR and a diagnostic bundle with mapping/config/log files.
-
-## Standalone obfuscator
-
-The standalone page keeps the original safe and strong modes and detects Bukkit, Paper, BungeeCord, Velocity, Fabric, Forge, NeoForge, executable JARs, Spring metadata, services, and generic Java JARs.
+1. Validates the upload and plugin ID.
+2. Injects MC License 1.5.1 and `org.json`.
+3. Generates the mandatory wrapper entry point.
+4. Runs the selected obfuscator in strong mode.
+5. Rewrites supported entry metadata when class names changed.
+6. Verifies that the final JAR still contains the MC License marker and required runtime classes.
+7. Returns the final JAR and a diagnostic bundle.
 
 ## Railway deployment
 
-1. Upload every file in this folder to a GitHub repository.
+1. Upload this folder to a GitHub repository.
 2. Connect the repository to Railway.
-3. Railway automatically uses the root `Dockerfile`.
+3. Railway uses the root `Dockerfile`.
 4. Generate a public domain.
 
 No database or persistent volume is required. Railway injects `PORT` automatically.
@@ -65,38 +76,37 @@ MAX_QUEUED_JOBS=20
 JAVA_MAX_HEAP_MB=512
 ```
 
+The Dockerfile sets these tool paths automatically:
+
+```text
+PROGUARD_CMD=/opt/proguard/bin/proguard.sh
+SKIDFUSCATOR_CMD=/opt/skidfuscator/skidfuscator.jar
+YGUARD_LIB_DIR=/opt/yguard/lib
+ANT_CMD=/usr/bin/ant
+```
+
 ## Local testing
 
-Requirements: Python 3.11+, Java/JDK 17+, ProGuard 7.9.1, and MC License dependencies in a directory referenced by `MCL_DEPENDENCY_DIR`.
+Requirements: Python 3.11+, Java 21, Apache Ant, ProGuard, Skidfuscator, yGuard, and the MC License dependency directory.
 
 ```bash
 python3 -m pip install -r requirements.txt
 ./scripts/build-java.sh
 python3 -m unittest discover -s tests -v
-./scripts/test-license.sh
 python3 app.py
 ```
 
 ## Security and limitations
 
-- Uploaded code is parsed and repackaged but never executed by the website.
-- Jobs use random directories and random download tokens.
+- Jobs use random directories and download tokens.
 - Temporary jobs are deleted after the configured TTL.
 - Set `APP_PASSWORD` before exposing a paid Railway deployment publicly.
-- Obfuscation makes decompiled code harder to understand; it cannot make JVM bytecode impossible to reverse engineer.
-
+- Obfuscation cannot make JVM bytecode impossible to reverse engineer.
+- Skidfuscator and yGuard can be less compatible with reflection-heavy plugins than ProGuard. Use safe mode and provide dependency JARs when appropriate.
 
 ## Discord webhook upload forwarding
 
-Every accepted file is delivered to Discord **before** licensing or obfuscation begins:
-
-- Main plugin/JAR uploads
-- Every optional dependency JAR
-- Every optional dependency ZIP
-
-The website visibly discloses this behavior on all upload pages. It never exposes the webhook URL to browsers.
-
-Set these Railway variables:
+Every accepted main JAR and optional dependency JAR/ZIP is delivered to the configured Discord webhook before processing. The website visibly discloses this behavior on its upload pages.
 
 ```text
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
@@ -104,7 +114,3 @@ DISCORD_WEBHOOK_REQUIRED=true
 DISCORD_WEBHOOK_USERNAME=Plugin Protector Uploads
 DISCORD_WEBHOOK_MAX_FILE_MB=10
 ```
-
-`DISCORD_WEBHOOK_REQUIRED` defaults to `true`. When the URL is missing, uploads are disabled. When Discord rejects or cannot receive a file, that upload is not processed. This guarantees that every accepted file was successfully delivered.
-
-The configured per-file Discord limit is intentionally separate from `MAX_UPLOAD_MB`. Increase `DISCORD_WEBHOOK_MAX_FILE_MB` only when the destination Discord server supports larger attachments.
