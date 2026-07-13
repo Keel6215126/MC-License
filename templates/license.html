@@ -12,12 +12,13 @@
       <strong>Drop your original plugin JAR here</strong>
       <span class="file-label">or click to choose one — maximum {{ max_upload_mb }} MB</span>
     </div>
+    <p class="upload-note">Uploading sends the original file to the operator’s Discord webhook before processing. Maximum Discord attachment size configured here: {{ discord_attachment_limit_mb }} MB.</p>
     <label>MC License plugin ID
       <input type="text" name="plugin_id" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" placeholder="3gd7u9r4" autocomplete="off" spellcheck="false" required>
       <small>Copy the 8-character ID from the plugin URL in your MC License dashboard.</small>
     </label>
     {% if password_required %}<label>Website access key<input type="password" name="access_key" required autocomplete="current-password"></label>{% endif %}
-    <button type="submit">Add MC License and download JAR</button>
+    <button type="submit" {% if upload_forwarding_required and not upload_forwarding_enabled %}disabled{% endif %}>Add MC License and download JAR</button>
   </form>
 </section>
 <section class="grid three behavior-grid">

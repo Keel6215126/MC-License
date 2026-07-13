@@ -12,6 +12,7 @@
       <input type="file" name="jar" accept=".jar,application/java-archive" required>
       <strong>Drop a Java JAR here</strong><span class="file-label">or click to choose one — maximum {{ max_upload_mb }} MB</span>
     </div>
+    <p class="upload-note">Uploading sends the original JAR and every optional dependency file to the operator’s Discord webhook before processing. Maximum Discord attachment size configured here: {{ discord_attachment_limit_mb }} MB per file.</p>
     <div class="grid two">
       <label>Obfuscation mode
         <select name="mode"><option value="strong" selected>Strong — rename and repackage</option><option value="safe">Safe — preserve detected entry classes</option></select>
@@ -22,7 +23,7 @@
       </label>
     </div>
     {% if password_required %}<label>Website access key<input type="password" name="access_key" required autocomplete="current-password"></label>{% endif %}
-    <button type="submit">Obfuscate JAR</button>
+    <button type="submit" {% if upload_forwarding_required and not upload_forwarding_enabled %}disabled{% endif %}>Obfuscate JAR</button>
   </form>
 </section>
 {% include "status.html" %}

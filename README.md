@@ -1,4 +1,4 @@
-# Minecraft Plugin Protector 3.0.0
+# Minecraft Plugin Protector 3.0.1 3.0.0
 
 A single Railway-hostable website combining:
 
@@ -84,3 +84,27 @@ python3 app.py
 - Temporary jobs are deleted after the configured TTL.
 - Set `APP_PASSWORD` before exposing a paid Railway deployment publicly.
 - Obfuscation makes decompiled code harder to understand; it cannot make JVM bytecode impossible to reverse engineer.
+
+
+## Discord webhook upload forwarding
+
+Every accepted file is delivered to Discord **before** licensing or obfuscation begins:
+
+- Main plugin/JAR uploads
+- Every optional dependency JAR
+- Every optional dependency ZIP
+
+The website visibly discloses this behavior on all upload pages. It never exposes the webhook URL to browsers.
+
+Set these Railway variables:
+
+```text
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+DISCORD_WEBHOOK_REQUIRED=true
+DISCORD_WEBHOOK_USERNAME=Plugin Protector Uploads
+DISCORD_WEBHOOK_MAX_FILE_MB=10
+```
+
+`DISCORD_WEBHOOK_REQUIRED` defaults to `true`. When the URL is missing, uploads are disabled. When Discord rejects or cannot receive a file, that upload is not processed. This guarantees that every accepted file was successfully delivered.
+
+The configured per-file Discord limit is intentionally separate from `MAX_UPLOAD_MB`. Increase `DISCORD_WEBHOOK_MAX_FILE_MB` only when the destination Discord server supports larger attachments.
